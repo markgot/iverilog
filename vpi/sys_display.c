@@ -407,13 +407,13 @@ static unsigned int get_format_char(char **rtn, int ljust, int plus,
         vpi_printf("WARNING: %s:%d: missing argument for %s%s.\n",
                    info->filename, info->lineno, info->name, fmtb);
       } else {
-        value.format = vpiStringVal;
+        value.format = vpiIntVal;
         vpi_get_value(info->items[*idx], &value);
         if (value.format == vpiSuppressVal) {
           vpi_printf("WARNING: %s:%d: incompatible value for %s%s.\n",
                      info->filename, info->lineno, info->name, fmtb);
         } else {
-          char ch = value.value.str[strlen(value.value.str)-1];
+          char ch = value.value.integer;
 
           /* If the width is less than one then use a width of one. */
           if (width < 1) width = 1;
@@ -1169,7 +1169,7 @@ static int sys_check_args(vpiHandle callh, vpiHandle argv, const PLI_BYTE8*name,
 			           name, vpi_get_str(vpiType, arg));
 			ret = 1;
 		  }
-
+		  // fallthrough
 	      case vpiConstant:
 	      case vpiParameter:
 	      case vpiNet:

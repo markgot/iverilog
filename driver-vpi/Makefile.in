@@ -36,6 +36,7 @@ mandir = @mandir@
 dllib=@DLLIB@
 
 CC = @CC@
+HOSTCC := @CC@
 WINDRES = @WINDRES@
 INSTALL = @INSTALL@
 INSTALL_PROGRAM = @INSTALL_PROGRAM@
@@ -65,7 +66,7 @@ distclean: clean
 	rm -f Makefile config.log
 
 cppcheck: main.c
-	cppcheck --enable=all -f $(INCLUDE_PATH) $^
+	cppcheck --enable=all --std=posix --std=c99 --std=c++03 -f $(INCLUDE_PATH) $^
 
 Makefile: $(srcdir)/Makefile.in ../config.status
 	cd ..; ./config.status --file=driver-vpi/$@
@@ -93,10 +94,19 @@ res.o: res.rc
 	$(WINDRES) -i res.rc -o res.o
 #
 
-install: all installdirs $(bindir)/iverilog-vpi$(suffix)@EXEEXT@
+install: all installdirs installfiles
 
-$(bindir)/iverilog-vpi$(suffix)@EXEEXT@: ./iverilog-vpi@EXEEXT@
+F = ./iverilog-vpi@EXEEXT@
+
+installfiles: $(F) | installdirs
 	$(INSTALL_PROGRAM) ./iverilog-vpi@EXEEXT@ "$(bindir)/iverilog-vpi$(suffix)@EXEEXT@"
+ifeq (@WIN32@,yes)
+ifneq ($(HOSTCC),$(CC))
+	$(INSTALL_PROGRAM) $(shell $(HOSTCC) --print-file-name=libwinpthread-1.dll) "$(DESTDIR)$(bindir)"
+	$(INSTALL_PROGRAM) $(shell $(HOSTCC) --print-file-name=libgcc_s_sjlj-1.dll) "$(DESTDIR)$(bindir)"
+	$(INSTALL_PROGRAM) $(shell $(HOSTCC) --print-file-name=libstdc++-6.dll) "$(DESTDIR)$(bindir)"
+endif
+endif
 
 installdirs: $(srcdir)/../mkinstalldirs
 	$(srcdir)/../mkinstalldirs "$(bindir)"

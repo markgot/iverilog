@@ -1,7 +1,7 @@
 #ifndef IVL_ivl_target_H
 #define IVL_ivl_target_H
 /*
- * Copyright (c) 2000-2017 Stephen Williams (steve@icarus.com)
+ * Copyright (c) 2000-2020 Stephen Williams (steve@icarus.com)
  *
  *    This source code is free software; you can redistribute it
  *    and/or modify it in source code form under the terms of the GNU
@@ -434,6 +434,14 @@ typedef enum ivl_statement_type_e {
       IVL_ST_WHILE   = 23
 } ivl_statement_type_t;
 
+/* Case statements can be tagged as unique/unique0/priority. */
+typedef enum ivl_case_quality_t {
+      IVL_CASE_QUALITY_BASIC    = 0,  /* no quality flags */
+      IVL_CASE_QUALITY_UNIQUE   = 1,
+      IVL_CASE_QUALITY_UNIQUE0  = 2,
+      IVL_CASE_QUALITY_PRIORITY = 3
+} ivl_case_quality_t;
+
 /* SystemVerilog allows a system function to be called as a task. */
 typedef enum ivl_sfunc_as_task_e {
       IVL_SFUNC_AS_TASK_ERROR   = 0,
@@ -516,6 +524,10 @@ extern ivl_island_t ivl_branch_island(ivl_branch_t obj);
  * ivl_path_is_condit
  *    Is this a conditional structure? Needed for ifnone.
  *
+ * ivl_path_is_parallel
+ *    This returns true if the path is a parallel connection and
+ *    false if the path is a full connection.
+ *
  * ivl_path_source_posedge
  * ivl_path_source_negedge
  *    These functions return true if the source is edge sensitive.
@@ -525,6 +537,8 @@ extern ivl_nexus_t ivl_path_source(ivl_delaypath_t obj);
 extern uint64_t ivl_path_delay(ivl_delaypath_t obj, ivl_path_edge_t pt);
 extern ivl_nexus_t ivl_path_condit(ivl_delaypath_t obj);
 extern int ivl_path_is_condit(ivl_delaypath_t obj);
+
+extern int ivl_path_is_parallel(ivl_delaypath_t obj);
 
 extern int ivl_path_source_posedge(ivl_delaypath_t obj);
 extern int ivl_path_source_negedge(ivl_delaypath_t obj);
@@ -1251,8 +1265,10 @@ extern unsigned    ivl_lpm_lineno(ivl_lpm_t net);
  * width of a general power is the XXXX of the widths of the
  * inputs.
  *
- * Power may be signed. If so, the output should be sign extended
- * to fill in its result.
+ * Power may be signed. This indicates the type of the exponent. The
+ * base will always be treated as unsigned. The compiler must ensure
+ * the width of the base is equal to the width of the output to
+ * obtain the correct result when the base is really a signed value.
  *
  * - Part Select (IVL_LPM_PART_VP and IVL_LPM_PART_PV)
  * There are two part select devices, one that extracts a part from a
@@ -2220,6 +2236,8 @@ extern ivl_scope_t ivl_stmt_call(ivl_statement_t net);
 extern unsigned ivl_stmt_case_count(ivl_statement_t net);
   /* IVL_ST_CASE,IVL_ST_CASER,IVL_ST_CASEX,IVL_ST_CASEZ */
 extern ivl_expr_t ivl_stmt_case_expr(ivl_statement_t net, unsigned i);
+  /* IVL+ST_CASE,IVL_ST_CASER,IVL_ST_CASEX,IVL_ST_CASEZ */
+extern ivl_case_quality_t ivl_stmt_case_quality(ivl_statement_t net);
   /* IVL_ST_CASE,IVL_ST_CASER,IVL_ST_CASEX,IVL_ST_CASEZ */
 extern ivl_statement_t ivl_stmt_case_stmt(ivl_statement_t net, unsigned i);
   /* IVL_ST_CONDIT IVL_ST_CASE IVL_ST_REPEAT IVL_ST_WHILE */

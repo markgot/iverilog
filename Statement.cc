@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998-2017 Stephen Williams (steve@icarus.com)
+ * Copyright (c) 1998-2019 Stephen Williams (steve@icarus.com)
  *
  *    This source code is free software; you can redistribute it
  *    and/or modify it in source code form under the terms of the GNU
@@ -158,6 +158,11 @@ void PBlock::push_statement_front(Statement*that)
       list_[0] = that;
 }
 
+PNamedItem::SymbolType PBlock::symbol_type() const
+{
+      return BLOCK;
+}
+
 PCallTask::PCallTask(const pform_name_t&n, const list<PExpr*>&p)
 : package_(0), path_(n), parms_(p.size())
 {
@@ -201,8 +206,8 @@ const pform_name_t& PCallTask::path() const
       return path_;
 }
 
-PCase::PCase(NetCase::TYPE t, PExpr*ex, svector<PCase::Item*>*l)
-: type_(t), expr_(ex), items_(l)
+PCase::PCase(ivl_case_quality_t q, NetCase::TYPE t, PExpr*ex, svector<PCase::Item*>*l)
+: quality_(q), type_(t), expr_(ex), items_(l)
 {
 }
 
@@ -294,20 +299,20 @@ PDoWhile::~PDoWhile()
 }
 
 PEventStatement::PEventStatement(const svector<PEEvent*>&ee)
-: expr_(ee), statement_(0), search_funcs_(false)
+: expr_(ee), statement_(0), always_sens_(false)
 {
       assert(expr_.count() > 0);
 }
 
 
 PEventStatement::PEventStatement(PEEvent*ee)
-: expr_(1), statement_(0), search_funcs_(false)
+: expr_(1), statement_(0), always_sens_(false)
 {
       expr_[0] = ee;
 }
 
-PEventStatement::PEventStatement(bool search_funcs)
-: statement_(0), search_funcs_(search_funcs)
+PEventStatement::PEventStatement(bool always_sens)
+: statement_(0), always_sens_(always_sens)
 {
 }
 
@@ -411,8 +416,8 @@ PReturn::~PReturn()
       delete expr_;
 }
 
-PTrigger::PTrigger(const pform_name_t&e)
-: event_(e)
+PTrigger::PTrigger(PPackage*pkg, const pform_name_t&e)
+: package_(pkg), event_(e)
 {
 }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998-2017 Stephen Williams (steve@icarus.com)
+ * Copyright (c) 1998-2020 Stephen Williams (steve@icarus.com)
  *
  *    This source code is free software; you can redistribute it
  *    and/or modify it in source code form under the terms of the GNU
@@ -238,7 +238,7 @@ ostream& netqueue_t::debug_dump(ostream&fd) const
 
 ostream& netvector_t::debug_dump(ostream&o) const
 {
-      o << type_ << (signed_? " signed" : " unsigned") << packed_dims_;
+      o << "netvector_t:" << type_ << (signed_? " signed" : " unsigned") << packed_dims_;
       return o;
 }
 
@@ -350,6 +350,10 @@ void NetDelaySrc::dump(ostream&o, unsigned ind) const
 	    if (has_condit()) o << " if";
 	    else o << " ifnone";
       }
+      if (parallel_)
+	    o << " parallel";
+      else
+	    o << " full";
       o << " src "
 	<< "(" << transition_delays_[IVL_PE_01]
 	<< "," << transition_delays_[IVL_PE_10]
@@ -1053,7 +1057,11 @@ void NetAlloc::dump(ostream&o, unsigned ind) const
 void NetAssign_::dump_lval(ostream&o) const
 {
       if (sig_) o << sig_->name();
-      else if (nest_) nest_->dump_lval(o);
+      else if (nest_) {
+	    o << "(";
+	    nest_->dump_lval(o);
+	    o << ")";
+      }
       else o << "<?>";
 
       if (! member_.nil()) {
@@ -1146,15 +1154,29 @@ void NetBlock::dump(ostream&o, unsigned ind) const
 
 void NetCase::dump(ostream&o, unsigned ind) const
 {
+      o << setw(ind) << "";
+      switch (quality_) {
+	  case IVL_CASE_QUALITY_BASIC:
+	    break;
+	  case IVL_CASE_QUALITY_UNIQUE:
+	    o << "unique ";
+	    break;
+	  case IVL_CASE_QUALITY_UNIQUE0:
+	    o << "unique0 ";
+	    break;
+	  case IVL_CASE_QUALITY_PRIORITY:
+	    o << "priority ";
+	    break;
+      }
       switch (type_) {
 	  case EQ:
-	    o << setw(ind) << "" << "case (" << *expr_ << ")" << endl;
+	    o << "case (" << *expr_ << ")" << endl;
 	    break;
 	  case EQX:
-	    o << setw(ind) << "" << "casex (" << *expr_ << ")" << endl;
+	    o << "casex (" << *expr_ << ")" << endl;
 	    break;
 	  case EQZ:
-	    o << setw(ind) << "" << "casez (" << *expr_ << ")" << endl;
+	    o << "casez (" << *expr_ << ")" << endl;
 	    break;
       }
 
@@ -1711,7 +1733,7 @@ void NetECast::dump(ostream&fd) const
 {
       if (op_=='2')
 	    fd << "bool<" << expr_width() << ">(" << *expr_ << ")";
-      else if (op_=='4')
+      else if (op_=='v')
 	    fd << "logic<" << expr_width() << ">(" << *expr_ << ")";
       else
 	    NetEUnary::dump(fd);

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2016 Stephen Williams (steve@icarus.com)
+ * Copyright (c) 2011-2019 Stephen Williams (steve@icarus.com)
  *
  *    This source code is free software; you can redistribute it
  *    and/or modify it in source code form under the terms of the GNU
@@ -515,37 +515,6 @@ static int show_stmt_assign_vector(ivl_statement_t net)
 		 value pushed. */
 	    fprintf(vvp_out, "    %%cvt/vr %u;\n", wid);
 
-      } else if (ivl_expr_value(rval) == IVL_VT_STRING) {
-	    /* Special case: string to vector casting */
-	    ivl_lval_t lval = ivl_stmt_lval(net, 0);
-	    fprintf(vvp_out, "    %%vpi_call %u %u \"$ivl_string_method$to_vec\", v%p_0, v%p_0 {0 0 0};\n",
-		ivl_file_table_index(ivl_stmt_file(net)), ivl_stmt_lineno(net),
-		ivl_expr_signal(rval), ivl_lval_sig(lval));
-	    if (slices) free(slices);
-            return 0;
-
-      } else if (ivl_expr_value(rval) == IVL_VT_DARRAY) {
-	    /* Special case: dynamic array to vector casting */
-	    ivl_lval_t lval = ivl_stmt_lval(net, 0);
-            void*rval_addr = NULL;
-
-            /* Even more special case: function call returning dynamic array */
-            if(ivl_expr_type(rval) == IVL_EX_UFUNC) {
-                rval_addr = ivl_scope_port(ivl_expr_def(rval), 0);
-                draw_ufunc_object(rval);
-                /* We do not need to store the result, it is going to be
-                   converted to vector quite soon. */
-                fprintf(vvp_out, "    %%pop/obj 1, 0; drop the result\n");
-            } else {
-                rval_addr = ivl_expr_signal(rval);
-            }
-
-	    fprintf(vvp_out, "    %%vpi_call %u %u \"$ivl_darray_method$to_vec\", v%p_0, v%p_0 {0 0 0};\n",
-		ivl_file_table_index(ivl_stmt_file(net)), ivl_stmt_lineno(net),
-		rval_addr, ivl_lval_sig(lval));
-	    if (slices) free(slices);
-            return 0;
-
       } else {
 	    unsigned wid = ivl_stmt_lwidth(net);
 	    draw_eval_vec4(rval);
@@ -1051,6 +1020,7 @@ static int show_stmt_assign_sig_darray(ivl_statement_t net)
 
       } else if (mux) {
 	    draw_eval_vec4(rval);
+	    resize_vec4_wid(rval, ivl_stmt_lwidth(net));
 
 	      /* The %store/dar/vec4 expects the array index to be in index
 		 register 3. Calculate the index in place. */
@@ -1114,8 +1084,9 @@ static int show_stmt_assign_sig_cobject(ivl_statement_t net)
 	    ivl_type_t prop_type = ivl_type_prop_type(sig_type, prop_idx);
 
 	    if (ivl_type_base(prop_type) == IVL_VT_BOOL) {
-		  assert(ivl_type_packed_dimensions(prop_type) == 1);
-		  assert(ivl_type_packed_msb(prop_type,0) >= ivl_type_packed_lsb(prop_type, 0));
+		  assert(ivl_type_packed_dimensions(prop_type) == 0 ||
+		         (ivl_type_packed_dimensions(prop_type) == 1 &&
+		          ivl_type_packed_msb(prop_type,0) >= ivl_type_packed_lsb(prop_type, 0)));
 
 		  draw_eval_vec4(rval);
 		  if (ivl_expr_value(rval)!=IVL_VT_BOOL)
@@ -1127,8 +1098,9 @@ static int show_stmt_assign_sig_cobject(ivl_statement_t net)
 		  fprintf(vvp_out, "    %%pop/obj 1, 0;\n");
 
 	    } else if (ivl_type_base(prop_type) == IVL_VT_LOGIC) {
-		  assert(ivl_type_packed_dimensions(prop_type) == 1);
-		  assert(ivl_type_packed_msb(prop_type,0) >= ivl_type_packed_lsb(prop_type, 0));
+		  assert(ivl_type_packed_dimensions(prop_type) == 0 ||
+		         (ivl_type_packed_dimensions(prop_type) == 1 &&
+		          ivl_type_packed_msb(prop_type,0) >= ivl_type_packed_lsb(prop_type, 0)));
 
 		  draw_eval_vec4(rval);
 

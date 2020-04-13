@@ -1,7 +1,7 @@
 
 %{
 /*
- * Copyright (c) 1998-2017 Stephen Williams (steve@icarus.com)
+ * Copyright (c) 1998-2020 Stephen Williams (steve@icarus.com)
  * Copyright CERN 2012-2013 / Stephen Williams (steve@icarus.com)
  *
  *    This source code is free software; you can redistribute it
@@ -408,6 +408,7 @@ static void current_function_set_statement(const YYLTYPE&loc, vector<Statement*>
 
       svector<PEEvent*>*event_expr;
 
+      ivl_case_quality_t case_quality;
       NetNet::Type nettype;
       PGBuiltin::Type gatetype;
       NetNet::PortType porttype;
@@ -446,6 +447,11 @@ static void current_function_set_statement(const YYLTYPE&loc, vector<Statement*>
 	    data_type_t*type;
 	    list<PExpr*>*exprs;
       } class_declaration_extends;
+
+      struct {
+	    char*text;
+	    PExpr*expr;
+      } genvar_iter;
 
       verinum* number;
 
@@ -561,7 +567,7 @@ static void current_function_set_statement(const YYLTYPE&loc, vector<Statement*>
 %type <number>  number pos_neg_number
 %type <flag>    signing unsigned_signed_opt signed_unsigned_opt
 %type <flag>    import_export
-%type <flag>    K_packed_opt K_reg_opt K_static_opt K_virtual_opt
+%type <flag>    K_genvar_opt K_packed_opt K_reg_opt K_static_opt K_virtual_opt
 %type <flag>    udp_reg_opt edge_operator
 %type <drive>   drive_strength drive_strength_opt dr_strength0 dr_strength1
 %type <letter>  udp_input_sym udp_output_sym
@@ -575,6 +581,7 @@ static void current_function_set_statement(const YYLTYPE&loc, vector<Statement*>
 %type <expr>    udp_initial_expr_opt
 
 %type <text> register_variable net_variable event_variable endlabel_opt class_declaration_endlabel_opt
+%type <text> block_identifier_opt
 %type <perm_strings> register_variable_list net_variable_list event_variable_list
 %type <perm_strings> list_of_identifiers loop_variables
 %type <port_list> list_of_port_identifiers list_of_variable_port_identifiers
@@ -597,6 +604,7 @@ static void current_function_set_statement(const YYLTYPE&loc, vector<Statement*>
 
 %type <named_pexpr> modport_simple_port port_name parameter_value_byname
 %type <named_pexprs> port_name_list parameter_value_byname_list
+%type <exprs> port_conn_expression_list_with_nuls
 
 %type <named_pexpr> attribute
 %type <named_pexprs> attribute_list attribute_instance_list attribute_list_opt
@@ -651,6 +659,9 @@ static void current_function_set_statement(const YYLTYPE&loc, vector<Statement*>
 %type <statement> statement statement_item statement_or_null
 %type <statement> compressed_statement
 %type <statement> loop_statement for_step jump_statement
+%type <statement> concurrent_assertion_statement
+%type <statement> deferred_immediate_assertion_statement
+%type <statement> simple_immediate_assertion_statement
 %type <statement> procedural_assertion_statement
 %type <statement_list> statement_or_null_list statement_or_null_list_opt
 
@@ -665,10 +676,16 @@ static void current_function_set_statement(const YYLTYPE&loc, vector<Statement*>
 %type <specpath> specify_edge_path specify_edge_path_decl
 
 %type <real_type> non_integer_type
+%type <int_val> assert_or_assume
+%type <int_val> deferred_mode
 %type <int_val> atom2_type
 %type <int_val> module_start module_end
 
 %type <lifetime> lifetime lifetime_opt
+
+%type <case_quality> unique_priority
+
+%type <genvar_iter> genvar_iteration
 
 %token K_TAND
 %right K_PLUS_EQ K_MINUS_EQ K_MUL_EQ K_DIV_EQ K_MOD_EQ K_AND_EQ K_OR_EQ
@@ -713,8 +730,16 @@ source_text
   | /* empty */
   ;
 
+assert_or_assume
+  : K_assert
+      { $$ = 1; } /* IEEE1800-2012: Table 20-7 */
+  | K_assume
+      { $$ = 4; } /* IEEE1800-2012: Table 20-7 */
+  ;
+
 assertion_item /* IEEE1800-2012: A.6.10 */
   : concurrent_assertion_item
+  | deferred_immediate_assertion_item
   ;
 
 assignment_pattern /* IEEE1800-2005: A.6.7.1 */
@@ -735,7 +760,9 @@ assignment_pattern /* IEEE1800-2005: A.6.7.1 */
      implements it in a LALR way. */
 block_identifier_opt /* */
   : IDENTIFIER ':'
+      { $$ = $1; }
   |
+      { $$ = 0; }
   ;
 
 class_declaration /* IEEE1800-2005: A.1.2 */
@@ -810,12 +837,14 @@ class_declaration_endlabel_opt
 
 class_declaration_extends_opt /* IEEE1800-2005: A.1.2 */
   : K_extends TYPE_IDENTIFIER
-      { $$.type = $2.type;
+      { pform_set_type_referenced(@2, $2.text);
+	$$.type = $2.type;
 	$$.exprs= 0;
 	delete[]$2.text;
       }
   | K_extends TYPE_IDENTIFIER '(' expression_list_with_nuls ')'
-      { $$.type  = $2.type;
+      { pform_set_type_referenced(@2, $2.text);
+	$$.type  = $2.type;
 	$$.exprs = $4;
 	delete[]$2.text;
       }
@@ -855,7 +884,7 @@ class_item /* IEEE1800-2005: A.1.8 */
 	current_function = 0;
       }
 
-    /* Class properties... */
+    /* IEEE1800-2017: A.1.9 Class items: Class properties... */
 
   | property_qualifier_opt data_type list_of_variable_decl_assignments ';'
       { pform_class_property(@2, $1, $2, $3); }
@@ -863,7 +892,15 @@ class_item /* IEEE1800-2005: A.1.8 */
   | K_const class_item_qualifier_opt data_type list_of_variable_decl_assignments ';'
       { pform_class_property(@1, $2 | property_qualifier_t::make_const(), $3, $4); }
 
-    /* Class methods... */
+    /* IEEEE1800-2017: A.1.9 Class items: class_item ::= { property_qualifier} data_declaration */
+
+  | property_qualifier_opt K_typedef data_type IDENTIFIER dimensions_opt ';'
+      { perm_string name = lex_strings.make($4);
+	delete[]$4;
+	pform_set_typedef(name, $3, $5);
+      }
+
+    /* IEEE1800-1017: A.1.9 Class items: Class methods... */
 
   | method_qualifier_opt task_declaration
       { /* The task_declaration rule puts this into the class */ }
@@ -969,16 +1006,98 @@ class_new /* IEEE1800-2005 A.2.4 */
      concurrent_assertion_statement and checker_instantiation rules. */
 
 concurrent_assertion_item /* IEEE1800-2012 A.2.10 */
-  : block_identifier_opt K_assert K_property '(' property_spec ')' statement_or_null
-      { /* */
-	if (gn_assertions_flag) {
-	      yyerror(@2, "sorry: concurrent_assertion_item not supported."
-		      " Try -gno-assertion to turn this message off.");
-	}
+  : block_identifier_opt concurrent_assertion_statement
+      { delete $1;
+	delete $2;
       }
-  | block_identifier_opt K_assert K_property '(' error ')' statement_or_null
+  ;
+
+concurrent_assertion_statement /* IEEE1800-2012 A.2.10 */
+  : assert_or_assume K_property '(' property_spec ')' statement_or_null %prec less_than_K_else
+      { /* */
+	if (gn_unsupported_assertions_flag) {
+	      yyerror(@1, "sorry: concurrent_assertion_item not supported."
+		      " Try -gno-assertions or -gsupported-assertions"
+		      " to turn this message off.");
+	}
+        $$ = 0;
+      }
+  | assert_or_assume K_property '(' property_spec ')' K_else statement_or_null
+      { /* */
+	if (gn_unsupported_assertions_flag) {
+	      yyerror(@1, "sorry: concurrent_assertion_item not supported."
+		      " Try -gno-assertions or -gsupported-assertions"
+		      " to turn this message off.");
+	}
+        $$ = 0;
+      }
+  | assert_or_assume K_property '(' property_spec ')' statement_or_null K_else statement_or_null
+      { /* */
+	if (gn_unsupported_assertions_flag) {
+	      yyerror(@1, "sorry: concurrent_assertion_item not supported."
+		      " Try -gno-assertions or -gsupported-assertions"
+		      " to turn this message off.");
+	}
+        $$ = 0;
+      }
+  | K_cover K_property '(' property_spec ')' statement_or_null
+      { /* */
+	if (gn_unsupported_assertions_flag) {
+	      yyerror(@1, "sorry: concurrent_assertion_item not supported."
+		      " Try -gno-assertions or -gsupported-assertions"
+		      " to turn this message off.");
+	}
+        $$ = 0;
+      }
+      /* For now, cheat, and use property_spec for the sequence specification.
+         They are syntactically identical. */
+  | K_cover K_sequence '(' property_spec ')' statement_or_null
+      { /* */
+	if (gn_unsupported_assertions_flag) {
+	      yyerror(@1, "sorry: concurrent_assertion_item not supported."
+		      " Try -gno-assertions or -gsupported-assertions"
+		      " to turn this message off.");
+	}
+        $$ = 0;
+      }
+  | K_restrict K_property '(' property_spec ')' ';'
+      { /* */
+	if (gn_unsupported_assertions_flag) {
+	      yyerror(@2, "sorry: concurrent_assertion_item not supported."
+		      " Try -gno-assertions or -gsupported-assertions"
+		      " to turn this message off.");
+	}
+        $$ = 0;
+      }
+  | assert_or_assume K_property '(' error ')' statement_or_null %prec less_than_K_else
       { yyerrok;
         yyerror(@2, "error: Error in property_spec of concurrent assertion item.");
+        $$ = 0;
+      }
+  | assert_or_assume K_property '(' error ')' K_else statement_or_null
+      { yyerrok;
+        yyerror(@2, "error: Error in property_spec of concurrent assertion item.");
+        $$ = 0;
+      }
+  | assert_or_assume K_property '(' error ')' statement_or_null K_else statement_or_null
+      { yyerrok;
+        yyerror(@2, "error: Error in property_spec of concurrent assertion item.");
+        $$ = 0;
+      }
+  | K_cover K_property '(' error ')' statement_or_null
+      { yyerrok;
+        yyerror(@2, "error: Error in property_spec of concurrent assertion item.");
+        $$ = 0;
+      }
+  | K_cover K_sequence '(' error ')' statement_or_null
+      { yyerrok;
+        yyerror(@2, "error: Error in property_spec of concurrent assertion item.");
+        $$ = 0;
+      }
+  | K_restrict K_property '(' error ')' ';'
+      { yyerrok;
+        yyerror(@2, "error: Error in property_spec of concurrent assertion item.");
+        $$ = 0;
       }
   ;
 
@@ -1039,6 +1158,10 @@ data_declaration /* IEEE1800-2005: A.2.1.3 */
 	}
 	pform_makewire(@2, 0, str_strength, $3, NetNet::IMPLICIT_REG, data_type);
       }
+  | attribute_list_opt K_event event_variable_list ';'
+      { if ($3) pform_make_events($3, @2.text, @2.first_line);
+      }
+  | attribute_list_opt package_import_declaration
   ;
 
 data_type /* IEEE1800-2005: A.2.2.1 */
@@ -1086,7 +1209,8 @@ data_type /* IEEE1800-2005: A.2.2.1 */
 	$$ = tmp;
       }
   | TYPE_IDENTIFIER dimensions_opt
-      { if ($2) {
+      { pform_set_type_referenced(@1, $1.text);
+	if ($2) {
 	      parray_type_t*tmp = new parray_type_t($1.type, $2);
 	      FILE_NAME(tmp, @1);
 	      $$ = tmp;
@@ -1141,6 +1265,84 @@ data_type_or_implicit_or_void
 	FILE_NAME(tmp, @1);
 	$$ = tmp;
       }
+  ;
+
+deferred_immediate_assertion_item /* IEEE1800-2012: A.6.10 */
+  : block_identifier_opt deferred_immediate_assertion_statement
+      { delete $1;
+	delete $2;
+      }
+  ;
+
+deferred_immediate_assertion_statement /* IEEE1800-2012 A.6.10 */
+  : assert_or_assume deferred_mode '(' expression ')' statement_or_null %prec less_than_K_else
+      {
+	if (gn_unsupported_assertions_flag) {
+	      yyerror(@1, "sorry: Deferred assertions are not supported."
+		      " Try -gno-assertions or -gsupported-assertions"
+		      " to turn this message off.");
+	}
+	delete $4;
+	delete $6;
+	$$ = 0;
+      }
+  | assert_or_assume deferred_mode '(' expression ')' K_else statement_or_null
+      {
+	if (gn_unsupported_assertions_flag) {
+	      yyerror(@1, "sorry: Deferred assertions are not supported."
+		      " Try -gno-assertions or -gsupported-assertions"
+		      " to turn this message off.");
+	}
+	delete $4;
+	delete $7;
+	$$ = 0;
+      }
+  | assert_or_assume deferred_mode '(' expression ')' statement_or_null K_else statement_or_null
+      {
+	if (gn_unsupported_assertions_flag) {
+	      yyerror(@1, "sorry: Deferred assertions are not supported."
+		      " Try -gno-assertions or -gsupported-assertions"
+		      " to turn this message off.");
+	}
+	delete $4;
+	delete $6;
+	delete $8;
+	$$ = 0;
+      }
+  | K_cover deferred_mode '(' expression ')' statement_or_null
+      {
+	  /* Coverage collection is not currently supported. */
+	delete $4;
+	delete $6;
+	$$ = 0;
+      }
+  | assert_or_assume deferred_mode '(' error ')' statement_or_null %prec less_than_K_else
+      { yyerror(@1, "error: Malformed conditional expression.");
+	$$ = $6;
+      }
+  | assert_or_assume deferred_mode '(' error ')' K_else statement_or_null
+      { yyerror(@1, "error: Malformed conditional expression.");
+	$$ = $7;
+      }
+  | assert_or_assume deferred_mode '(' error ')' statement_or_null K_else statement_or_null
+      { yyerror(@1, "error: Malformed conditional expression.");
+	$$ = $6;
+      }
+  | K_cover deferred_mode '(' error ')' statement_or_null
+      { yyerror(@1, "error: Malformed conditional expression.");
+	$$ = $6;
+      }
+  ;
+
+deferred_mode
+  : '#' DEC_NUMBER
+      { if (!$2->is_zero()) {
+	      yyerror(@2, "error: Delay value must be zero for deferred assertion.");
+	}
+        delete $2;
+	$$ = 0; }
+  | K_final
+      { $$ = 1; }
   ;
 
   /* NOTE: The "module" rule of the description combines the
@@ -1297,6 +1499,29 @@ function_declaration /* IEEE1800-2005: A.2.6 */
 
   ;
 
+genvar_iteration /* IEEE1800-2012: A.4.2 */
+  : IDENTIFIER '=' expression
+      { $$.text = $1;
+        $$.expr = $3;
+      }
+  | IDENTIFIER K_INCR
+      { $$.text = $1;
+        $$.expr = pform_genvar_inc_dec(@1, $1, true);
+      }
+  | IDENTIFIER K_DECR
+      { $$.text = $1;
+        $$.expr = pform_genvar_inc_dec(@1, $1, false);
+      }
+  | K_INCR IDENTIFIER
+      { $$.text = $2;
+        $$.expr = pform_genvar_inc_dec(@1, $2, true);
+      }
+  | K_DECR IDENTIFIER
+      { $$.text = $2;
+        $$.expr = pform_genvar_inc_dec(@1, $2, false);
+      }
+  ;
+
 import_export /* IEEE1800-2012: A.2.9 */
   : K_import { $$ = true; }
   | K_export { $$ = false; }
@@ -1405,8 +1630,7 @@ loop_statement /* IEEE1800-2005: A.6.8 */
 	char for_block_name [64];
 	snprintf(for_block_name, sizeof for_block_name, "$ivl_for_loop%u", for_counter);
 	for_counter += 1;
-	PBlock*tmp = pform_push_block_scope(for_block_name, PBlock::BL_SEQ);
-	FILE_NAME(tmp, @1);
+	PBlock*tmp = pform_push_block_scope(@1, for_block_name, PBlock::BL_SEQ);
 	current_block_stack.push(tmp);
 
 	list<decl_assignment_t*>assign_list;
@@ -1419,7 +1643,7 @@ loop_statement /* IEEE1800-2005: A.6.8 */
       { pform_name_t tmp_hident;
 	tmp_hident.push_back(name_component_t(lex_strings.make($4)));
 
-	PEIdent*tmp_ident = pform_new_ident(tmp_hident);
+	PEIdent*tmp_ident = pform_new_ident(@4, tmp_hident);
 	FILE_NAME(tmp_ident, @4);
 
 	PForStatement*tmp_for = new PForStatement(tmp_ident, $6, $8, $10, $13);
@@ -1467,8 +1691,7 @@ loop_statement /* IEEE1800-2005: A.6.8 */
 	snprintf(for_block_name, sizeof for_block_name, "$ivl_foreach%u", foreach_counter);
 	foreach_counter += 1;
 
-	PBlock*tmp = pform_push_block_scope(for_block_name, PBlock::BL_SEQ);
-	FILE_NAME(tmp, @1);
+	PBlock*tmp = pform_push_block_scope(@1, for_block_name, PBlock::BL_SEQ);
 	current_block_stack.push(tmp);
 
 	pform_make_foreach_declarations(@1, $5);
@@ -1553,12 +1776,19 @@ variable_decl_assignment /* IEEE1800-2005 A.2.3 */
 	delete[]$1;
 	$$ = tmp;
       }
-  | IDENTIFIER '=' K_new '(' ')'
+  | IDENTIFIER '=' class_new
       { decl_assignment_t*tmp = new decl_assignment_t;
 	tmp->name = lex_strings.make($1);
-	PENewClass*expr = new PENewClass;
-	FILE_NAME(expr, @3);
-	tmp->expr .reset(expr);
+	tmp->expr .reset($3);
+	delete[]$1;
+	$$ = tmp;
+      }
+  | IDENTIFIER dimensions '=' dynamic_array_new
+      { decl_assignment_t*tmp = new decl_assignment_t;
+	tmp->name = lex_strings.make($1);
+	tmp->index = *$2;
+	tmp->expr .reset($4);
+	delete $2;
 	delete[]$1;
 	$$ = tmp;
       }
@@ -1643,7 +1873,7 @@ modport_ports_list
 	delete[] $3;
       }
   | modport_ports_list ','
-      { yyerror(@2, "error: NULL port declarations are not allowed"); }
+      { yyerror(@2, "error: Superfluous comma in port declaration list."); }
   ;
 
 modport_ports_declaration
@@ -1815,23 +2045,17 @@ port_direction_opt
   |                { $$ = NetNet::PIMPLICIT; }
   ;
 
-property_expr /* IEEE1800-2012 A.2.10 */
-  : expression
+procedural_assertion_statement /* IEEE1800-2012 A.6.10 */
+  : concurrent_assertion_statement
+      { $$ = $1; }
+  | simple_immediate_assertion_statement
+      { $$ = $1; }
+  | deferred_immediate_assertion_statement
+      { $$ = $1; }
   ;
 
-procedural_assertion_statement /* IEEE1800-2012 A.6.10 */
-  : K_assert '(' expression ')' statement %prec less_than_K_else
-      { yyerror(@1, "sorry: Simple immediate assertion statements not implemented.");
-	$$ = 0;
-      }
-  | K_assert '(' expression ')' K_else statement
-      { yyerror(@1, "sorry: Simple immediate assertion statements not implemented.");
-	$$ = 0;
-      }
-  | K_assert '(' expression ')' statement K_else statement
-      { yyerror(@1, "sorry: Simple immediate assertion statements not implemented.");
-	$$ = 0;
-      }
+property_expr /* IEEE1800-2012 A.2.10 */
+  : expression
   ;
 
   /* The property_qualifier rule is as literally described in the LRM,
@@ -1884,6 +2108,72 @@ signing /* IEEE1800-2005: A.2.2.1 */
   | K_unsigned { $$ = false; }
   ;
 
+simple_immediate_assertion_statement /* IEEE1800-2012 A.6.10 */
+  : assert_or_assume '(' expression ')' statement_or_null %prec less_than_K_else
+      {
+	if (gn_supported_assertions_flag) {
+	      list<PExpr*>arg_list;
+	      PCallTask*tmp1 = new PCallTask(lex_strings.make("$error"), arg_list);
+	      FILE_NAME(tmp1, @1);
+	      PCondit*tmp2 = new PCondit($3, $5, tmp1);
+	      FILE_NAME(tmp2, @1);
+	      $$ = tmp2;
+	} else {
+	      delete $3;
+	      delete $5;
+	      $$ = 0;
+	}
+      }
+  | assert_or_assume '(' expression ')' K_else statement_or_null
+      {
+	if (gn_supported_assertions_flag) {
+	      PCondit*tmp = new PCondit($3, 0, $6);
+	      FILE_NAME(tmp, @1);
+	      $$ = tmp;
+	} else {
+	      delete $3;
+	      delete $6;
+	      $$ = 0;
+	}
+      }
+  | assert_or_assume '(' expression ')' statement_or_null K_else statement_or_null
+      {
+	if (gn_supported_assertions_flag) {
+	      PCondit*tmp = new PCondit($3, $5, $7);
+	      FILE_NAME(tmp, @1);
+	      $$ = tmp;
+	} else {
+	      delete $3;
+	      delete $5;
+	      delete $7;
+	      $$ = 0;
+	}
+      }
+  | K_cover '(' expression ')' statement_or_null
+      {
+	  /* Coverage collection is not currently supported. */
+	delete $3;
+	delete $5;
+	$$ = 0;
+      }
+  | assert_or_assume '(' error ')' statement_or_null %prec less_than_K_else
+      { yyerror(@1, "error: Malformed conditional expression.");
+	$$ = $5;
+      }
+  | assert_or_assume '(' error ')' K_else statement_or_null
+      { yyerror(@1, "error: Malformed conditional expression.");
+	$$ = $6;
+      }
+  | assert_or_assume '(' error ')' statement_or_null K_else statement_or_null
+      { yyerror(@1, "error: Malformed conditional expression.");
+	$$ = $5;
+      }
+  | K_cover '(' error ')' statement_or_null
+      { yyerror(@1, "error: Malformed conditional expression.");
+	$$ = $5;
+      }
+  ;
+
 simple_type_or_string /* IEEE1800-2005: A.2.2.1 */
   : integer_vector_type
       { ivl_variable_type_t use_vtype = $1;
@@ -1921,7 +2211,8 @@ simple_type_or_string /* IEEE1800-2005: A.2.2.1 */
 	$$ = tmp;
       }
   | TYPE_IDENTIFIER
-      { $$ = $1.type;
+      { pform_set_type_referenced(@1, $1.text);
+	$$ = $1.type;
 	delete[]$1.text;
       }
   | PACKAGE_IDENTIFIER K_SCOPE_RES
@@ -2222,7 +2513,11 @@ tf_port_item /* IEEE1800-2005: A.2.7 */
 	      tmp = pform_make_task_ports(@3, use_port_type, $2, ilist);
 	}
 	if ($4 != 0) {
-	      pform_set_reg_idx(name, $4);
+	      if (gn_system_verilog()) {
+		    pform_set_reg_idx(name, $4);
+	      } else {
+		    yyerror(@4, "error: Task/function port with unpacked dimensions requires SystemVerilog.");
+	      }
 	}
 
 	$$ = tmp;
@@ -2290,7 +2585,7 @@ tf_port_item_list
 	$$ = $3;
       }
   | tf_port_item_list ','
-      { yyerror(@2, "error: NULL port declarations are not allowed.");
+      { yyerror(@2, "error: Superfluous comma in port declaration list.");
 	$$ = $1;
       }
   | tf_port_item_list ';'
@@ -2341,9 +2636,7 @@ variable_dimension /* IEEE1800-2005: A.2.5 */
 		   << "Use at least -g2005-sv to remove this warning." << endl;
 	}
 	list<pform_range_t> *tmp = new list<pform_range_t>;
-	pform_range_t index;
-	index.first = new PENumber(new verinum((uint64_t)0, integer_width));
-	index.second = new PEBinary('-', $2, new PENumber(new verinum((uint64_t)1, integer_width)));
+	pform_range_t index ($2,0);
 	tmp->push_back(index);
 	$$ = tmp;
       }
@@ -2476,6 +2769,10 @@ block_item_decl
   /* Blocks can have type declarations. */
 
   | type_declaration
+
+  /* Blocks can have imports. */
+
+  | package_import_declaration
 
   /* Recover from errors that happen within variable lists. Use the
      trailing semi-colon to resync the parser. */
@@ -3106,7 +3403,8 @@ clocking_event_opt /* */
 
 event_control /* A.K.A. clocking_event */
 	: '@' hierarchy_identifier
-		{ PEIdent*tmpi = new PEIdent(*$2);
+		{ PEIdent*tmpi = pform_new_ident(@2, *$2);
+		  FILE_NAME(tmpi, @2);
 		  PEEvent*tmpe = new PEEvent(PEEvent::ANYEDGE, tmpi);
 		  PEventStatement*tmps = new PEventStatement(tmpe);
 		  FILE_NAME(tmps, @1);
@@ -3450,6 +3748,7 @@ expr_mintypmax
 expression_list_with_nuls
   : expression_list_with_nuls ',' expression
       { list<PExpr*>*tmp = $1;
+	if (tmp->empty()) tmp->push_back(0);
 	tmp->push_back($3);
 	$$ = tmp;
       }
@@ -3460,11 +3759,11 @@ expression_list_with_nuls
       }
   |
       { list<PExpr*>*tmp = new list<PExpr*>;
-        tmp->push_back(0);
 	$$ = tmp;
       }
   | expression_list_with_nuls ','
       { list<PExpr*>*tmp = $1;
+	if (tmp->empty()) tmp->push_back(0);
 	tmp->push_back(0);
 	$$ = tmp;
       }
@@ -3489,7 +3788,8 @@ expr_primary_or_typename
   /* There are a few special cases (notably $bits argument) where the
      expression may be a type name. Let the elaborator sort this out. */
   | TYPE_IDENTIFIER
-      { PETypename*tmp = new PETypename($1.type);
+      { pform_set_type_referenced(@1, $1.text);
+	PETypename*tmp = new PETypename($1.type);
 	FILE_NAME(tmp,@1);
 	$$ = tmp;
 	delete[]$1.text;
@@ -3542,7 +3842,7 @@ expr_primary
      indexed arrays and part selects */
 
   | hierarchy_identifier
-      { PEIdent*tmp = pform_new_ident(*$1);
+      { PEIdent*tmp = pform_new_ident(@1, *$1);
 	FILE_NAME(tmp, @1);
 	$$ = tmp;
 	delete $1;
@@ -3557,11 +3857,12 @@ expr_primary
      function call. If a system identifier, then a system function
      call. It can also be a call to a class method (function). */
 
-  | hierarchy_identifier '(' expression_list_with_nuls ')'
-      { list<PExpr*>*expr_list = $3;
+  | hierarchy_identifier attribute_list_opt '(' expression_list_with_nuls ')'
+      { list<PExpr*>*expr_list = $4;
 	strip_tail_items(expr_list);
 	PECallFunction*tmp = pform_make_call_function(@1, *$1, *expr_list);
 	delete $1;
+	delete $2;
 	$$ = tmp;
       }
   | implicit_class_handle '.' hierarchy_identifier '(' expression_list_with_nuls ')'
@@ -3922,7 +4223,7 @@ function_item
   /* A gate_instance is a module instantiation or a built in part
      type. In any case, the gate has a set of connections to ports. */
 gate_instance
-	: IDENTIFIER '(' expression_list_with_nuls ')'
+	: IDENTIFIER '(' port_conn_expression_list_with_nuls ')'
 		{ lgate*tmp = new lgate;
 		  tmp->name = $1;
 		  tmp->parms = $3;
@@ -3932,7 +4233,7 @@ gate_instance
 		  $$ = tmp;
 		}
 
-  | IDENTIFIER dimensions '(' expression_list_with_nuls ')'
+  | IDENTIFIER dimensions '(' port_conn_expression_list_with_nuls ')'
       { lgate*tmp = new lgate;
 	list<pform_range_t>*rng = $2;
 	tmp->name = $1;
@@ -3947,7 +4248,7 @@ gate_instance
 	$$ = tmp;
       }
 
-	| '(' expression_list_with_nuls ')'
+	| '(' port_conn_expression_list_with_nuls ')'
 		{ lgate*tmp = new lgate;
 		  tmp->name = "";
 		  tmp->parms = $2;
@@ -4241,8 +4542,7 @@ list_of_port_declarations
 		}
 	| list_of_port_declarations ','
 		{
-		  yyerror(@2, "error: NULL port declarations are not "
-		              "allowed.");
+		  yyerror(@2, "error: Superfluous comma in port declaration list.");
 		}
 	| list_of_port_declarations ';'
 		{
@@ -4437,7 +4737,7 @@ atom2_type
      rule to reflect the rules for assignment l-values. */
 lpvalue
   : hierarchy_identifier
-      { PEIdent*tmp = pform_new_ident(*$1);
+      { PEIdent*tmp = pform_new_ident(@1, *$1);
 	FILE_NAME(tmp, @1);
 	$$ = tmp;
 	delete $1;
@@ -4620,15 +4920,27 @@ module_port_list_opt
      ports. These are simply advance ways to declare parameters, so
      that the port declarations may use them. */
 module_parameter_port_list_opt
-	:
-        | '#' '(' module_parameter_port_list ')'
-	;
+  :
+  | '#' '(' module_parameter_port_list ')'
+  ;
 
 module_parameter_port_list
-	: K_parameter param_type parameter_assign
-	| module_parameter_port_list ',' parameter_assign
-	| module_parameter_port_list ',' K_parameter param_type parameter_assign
-	;
+  : K_parameter param_type parameter_assign
+  | K_localparam param_type localparam_assign
+      { if (!gn_system_verilog()) {
+	      yyerror(@1, "error: Local parameters in module parameter "
+			  "port lists requires SystemVerilog.");
+	}
+      }
+  | module_parameter_port_list ',' parameter_assign
+  | module_parameter_port_list ',' K_parameter param_type parameter_assign
+  | module_parameter_port_list ',' K_localparam param_type localparam_assign
+      { if (!gn_system_verilog()) {
+	      yyerror(@3, "error: Local parameters in module parameter "
+			  "port lists requires SystemVerilog.");
+	}
+      }
+  ;
 
 module_item
 
@@ -4972,33 +5284,31 @@ module_item
   | K_genvar list_of_identifiers ';'
       { pform_genvars(@1, $2); }
 
-  | K_for '(' IDENTIFIER '=' expression ';'
+  | K_for '(' K_genvar_opt IDENTIFIER '=' expression ';'
               expression ';'
-              IDENTIFIER '=' expression ')'
-      { pform_start_generate_for(@1, $3, $5, $7, $9, $11); }
+              genvar_iteration ')'
+      { pform_start_generate_for(@2, $3, $4, $6, $8, $10.text, $10.expr); }
     generate_block
-      { pform_endgenerate(); }
+      { pform_endgenerate(false); }
 
   | generate_if
     generate_block_opt
     K_else
       { pform_start_generate_else(@1); }
     generate_block
-      { pform_endgenerate(); }
+      { pform_endgenerate(true); }
 
   | generate_if
     generate_block_opt %prec less_than_K_else
-      { pform_endgenerate(); }
+      { pform_endgenerate(true); }
 
   | K_case '(' expression ')'
       { pform_start_generate_case(@1, $3); }
     generate_case_items
     K_endcase
-      { pform_endgenerate(); }
+      { pform_endgenerate(true); }
 
   | modport_declaration
-
-  | package_import_declaration
 
   /* 1364-2001 and later allow specparam declarations outside specify blocks. */
 
@@ -5091,9 +5401,9 @@ generate_case_items
 
 generate_case_item
   : expression_list_proper ':' { pform_generate_case_item(@1, $1); } generate_block_opt
-      { pform_endgenerate(); }
+      { pform_endgenerate(false); }
   | K_default ':' { pform_generate_case_item(@1, 0); } generate_block_opt
-      { pform_endgenerate(); }
+      { pform_endgenerate(false); }
   ;
 
 generate_item
@@ -5114,7 +5424,7 @@ generate_item
 	      warn_count += 1;
 	      cerr << @1 << ": warning: Anachronistic use of named begin/end to surround generate schemes." << endl;
 	}
-	pform_endgenerate();
+	pform_endgenerate(false);
       }
   ;
 
@@ -5247,7 +5557,8 @@ param_type
 	param_active_type = IVL_VT_BOOL;
       }
   | TYPE_IDENTIFIER
-      { pform_set_param_from_type(@1, $1.type, $1.text, param_active_range,
+      { pform_set_type_referenced(@1, $1.text);
+	pform_set_param_from_type(@1, $1.type, $1.text, param_active_range,
 	                          param_active_signed, param_active_type);
 	delete[]$1.text;
       }
@@ -5471,34 +5782,38 @@ port_opt
      looking for the ports of a module declaration. */
 
 port_name
-	: '.' IDENTIFIER '(' expression ')'
+	: attribute_list_opt '.' IDENTIFIER '(' expression ')'
 		{ named_pexpr_t*tmp = new named_pexpr_t;
-		  tmp->name = lex_strings.make($2);
-		  tmp->parm = $4;
-		  delete[]$2;
+		  tmp->name = lex_strings.make($3);
+		  tmp->parm = $5;
+		  delete[]$3;
+		  delete $1;
 		  $$ = tmp;
 		}
-	| '.' IDENTIFIER '(' error ')'
+	| attribute_list_opt '.' IDENTIFIER '(' error ')'
 		{ yyerror(@3, "error: invalid port connection expression.");
 		  named_pexpr_t*tmp = new named_pexpr_t;
-		  tmp->name = lex_strings.make($2);
+		  tmp->name = lex_strings.make($3);
 		  tmp->parm = 0;
-		  delete[]$2;
+		  delete[]$3;
+		  delete $1;
 		  $$ = tmp;
 		}
-	| '.' IDENTIFIER '(' ')'
+	| attribute_list_opt '.' IDENTIFIER '(' ')'
 		{ named_pexpr_t*tmp = new named_pexpr_t;
-		  tmp->name = lex_strings.make($2);
+		  tmp->name = lex_strings.make($3);
 		  tmp->parm = 0;
-		  delete[]$2;
+		  delete[]$3;
+		  delete $1;
 		  $$ = tmp;
 		}
-	| '.' IDENTIFIER
+	| attribute_list_opt '.' IDENTIFIER
 		{ named_pexpr_t*tmp = new named_pexpr_t;
-		  tmp->name = lex_strings.make($2);
-		  tmp->parm = new PEIdent(lex_strings.make($2), true);
+		  tmp->name = lex_strings.make($3);
+		  tmp->parm = new PEIdent(lex_strings.make($3), true);
 		  FILE_NAME(tmp->parm, @1);
-		  delete[]$2;
+		  delete[]$3;
+		  delete $1;
 		  $$ = tmp;
 		}
 	| K_DOTSTAR
@@ -5524,6 +5839,30 @@ port_name_list
       }
   ;
 
+port_conn_expression_list_with_nuls
+  : port_conn_expression_list_with_nuls ',' attribute_list_opt expression
+      { list<PExpr*>*tmp = $1;
+	tmp->push_back($4);
+	delete $3;
+	$$ = tmp;
+      }
+  | attribute_list_opt expression
+      { list<PExpr*>*tmp = new list<PExpr*>;
+	tmp->push_back($2);
+	delete $1;
+	$$ = tmp;
+      }
+  |
+      { list<PExpr*>*tmp = new list<PExpr*>;
+        tmp->push_back(0);
+	$$ = tmp;
+      }
+  | port_conn_expression_list_with_nuls ','
+      { list<PExpr*>*tmp = $1;
+	tmp->push_back(0);
+	$$ = tmp;
+      }
+  ;
 
   /* A port reference is an internal (to the module) name of the port,
      possibly with a part of bit select to attach it to specific bits
@@ -5660,6 +5999,20 @@ register_variable
 	pform_make_var_init(@1, name, $4);
 	$$ = $1;
       }
+  | IDENTIFIER dimensions_opt '=' dynamic_array_new
+      { if (pform_peek_scope()->var_init_needs_explicit_lifetime()
+	    && (var_lifetime == LexicalScope::INHERITED)) {
+	      cerr << @3 << ": warning: Static variable initialization requires "
+			    "explicit lifetime in this context." << endl;
+	      warn_count += 1;
+	}
+	perm_string name = lex_strings.make($1);
+	pform_makewire(@1, name, NetNet::REG,
+		       NetNet::NOT_A_PORT, IVL_VT_NO_TYPE, 0);
+	pform_set_reg_idx(name, $2);
+	pform_make_var_init(@1, name, $4);
+	$$ = $1;
+      }
   ;
 
 register_variable_list
@@ -5752,7 +6105,7 @@ specify_item
 		  pform_module_specify_path(tmp);
 		}
 	| K_ifnone specify_edge_path_decl ';'
-		{ yyerror(@1, "Sorry: ifnone with an edge-sensitive path is "
+		{ yywarn(@1, "Sorry: ifnone with an edge-sensitive path is "
 		              "not supported.");
 		  yyerrok;
 		}
@@ -6147,8 +6500,7 @@ statement_item /* This is roughly statement_item in the LRM */
       }
   /* In SystemVerilog an unnamed block can contain variable declarations. */
   | K_begin
-      { PBlock*tmp = pform_push_block_scope(0, PBlock::BL_SEQ);
-	FILE_NAME(tmp, @1);
+      { PBlock*tmp = pform_push_block_scope(@1, 0, PBlock::BL_SEQ);
 	current_block_stack.push(tmp);
       }
     block_item_decls_opt
@@ -6182,8 +6534,7 @@ statement_item /* This is roughly statement_item in the LRM */
 	$$ = tmp;
       }
   | K_begin ':' IDENTIFIER
-      { PBlock*tmp = pform_push_block_scope($3, PBlock::BL_SEQ);
-	FILE_NAME(tmp, @1);
+      { PBlock*tmp = pform_push_block_scope(@1, $3, PBlock::BL_SEQ);
 	current_block_stack.push(tmp);
       }
     block_item_decls_opt
@@ -6220,8 +6571,7 @@ statement_item /* This is roughly statement_item in the LRM */
       }
   /* In SystemVerilog an unnamed block can contain variable declarations. */
   | K_fork
-      { PBlock*tmp = pform_push_block_scope(0, PBlock::BL_PAR);
-	FILE_NAME(tmp, @1);
+      { PBlock*tmp = pform_push_block_scope(@1, 0, PBlock::BL_PAR);
 	current_block_stack.push(tmp);
       }
     block_item_decls_opt
@@ -6256,8 +6606,7 @@ statement_item /* This is roughly statement_item in the LRM */
 	$$ = tmp;
       }
   | K_fork ':' IDENTIFIER
-      { PBlock*tmp = pform_push_block_scope($3, PBlock::BL_PAR);
-	FILE_NAME(tmp, @1);
+      { PBlock*tmp = pform_push_block_scope(@1, $3, PBlock::BL_PAR);
 	current_block_stack.push(tmp);
       }
     block_item_decls_opt
@@ -6295,12 +6644,18 @@ statement_item /* This is roughly statement_item in the LRM */
 		  FILE_NAME(tmp, @1);
 		  $$ = tmp;
 		}
-	| K_TRIGGER hierarchy_identifier ';'
-		{ PTrigger*tmp = new PTrigger(*$2);
-		  FILE_NAME(tmp, @1);
-		  delete $2;
-		  $$ = tmp;
-		}
+  | K_TRIGGER hierarchy_identifier ';'
+      { PTrigger*tmp = pform_new_trigger(@2, 0, *$2);
+	FILE_NAME(tmp, @1);
+	delete $2;
+	$$ = tmp;
+      }
+  | K_TRIGGER PACKAGE_IDENTIFIER K_SCOPE_RES hierarchy_identifier
+      { PTrigger*tmp = pform_new_trigger(@4, $2, *$4);
+	FILE_NAME(tmp, @1);
+	delete $4;
+	$$ = tmp;
+      }
 
   | procedural_assertion_statement { $$ = $1; }
 
@@ -6308,27 +6663,28 @@ statement_item /* This is roughly statement_item in the LRM */
 
   | jump_statement { $$ = $1; }
 
-	| K_case '(' expression ')' case_items K_endcase
-		{ PCase*tmp = new PCase(NetCase::EQ, $3, $5);
-		  FILE_NAME(tmp, @1);
-		  $$ = tmp;
-		}
-	| K_casex '(' expression ')' case_items K_endcase
-		{ PCase*tmp = new PCase(NetCase::EQX, $3, $5);
-		  FILE_NAME(tmp, @1);
-		  $$ = tmp;
-		}
-	| K_casez '(' expression ')' case_items K_endcase
-		{ PCase*tmp = new PCase(NetCase::EQZ, $3, $5);
-		  FILE_NAME(tmp, @1);
-		  $$ = tmp;
-		}
-	| K_case '(' expression ')' error K_endcase
-		{ yyerrok; }
-	| K_casex '(' expression ')' error K_endcase
-		{ yyerrok; }
-	| K_casez '(' expression ')' error K_endcase
-		{ yyerrok; }
+  | unique_priority K_case '(' expression ')' case_items K_endcase
+      { PCase*tmp = new PCase($1, NetCase::EQ, $4, $6);
+	FILE_NAME(tmp, @2);
+	$$ = tmp;
+      }
+  | unique_priority K_casex '(' expression ')' case_items K_endcase
+      { PCase*tmp = new PCase($1, NetCase::EQX, $4, $6);
+	FILE_NAME(tmp, @2);
+	$$ = tmp;
+      }
+  | unique_priority K_casez '(' expression ')' case_items K_endcase
+      { PCase*tmp = new PCase($1, NetCase::EQZ, $4, $6);
+	FILE_NAME(tmp, @1);
+	$$ = tmp;
+      }
+  | unique_priority K_case '(' expression ')' error K_endcase
+      { yyerrok; }
+  | unique_priority K_casex '(' expression ')' error K_endcase
+      { yyerrok; }
+  | unique_priority K_casez '(' expression ')' error K_endcase
+      { yyerrok; }
+
 	| K_if '(' expression ')' statement_or_null %prec less_than_K_else
 		{ PCondit*tmp = new PCondit($3, $5, 0);
 		  FILE_NAME(tmp, @1);
@@ -6983,10 +7339,18 @@ udp_primitive
 		}
 	;
 
+unique_priority
+  :             { $$ = IVL_CASE_QUALITY_BASIC; }
+  | K_unique    { $$ = IVL_CASE_QUALITY_UNIQUE; }
+  | K_unique0   { $$ = IVL_CASE_QUALITY_UNIQUE0; }
+  | K_priority  { $$ = IVL_CASE_QUALITY_PRIORITY; }
+  ;
+
   /* Many keywords can be optional in the syntax, although their
      presence is significant. This is a fairly common pattern so
      collect those rules here. */
 
+K_genvar_opt   : K_genvar    { $$ = true; } | { $$ = false; } ;
 K_packed_opt   : K_packed    { $$ = true; } | { $$ = false; } ;
 K_reg_opt      : K_reg       { $$ = true; } | { $$ = false; } ;
 K_static_opt   : K_static    { $$ = true; } | { $$ = false; } ;

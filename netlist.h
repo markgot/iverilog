@@ -1,7 +1,7 @@
 #ifndef IVL_netlist_H
 #define IVL_netlist_H
 /*
- * Copyright (c) 1998-2017 Stephen Williams (steve@icarus.com)
+ * Copyright (c) 1998-2020 Stephen Williams (steve@icarus.com)
  * Copyright CERN 2013 / Stephen Williams (steve@icarus.com)
  *
  *    This source code is free software; you can redistribute it
@@ -77,6 +77,7 @@ class NetEvWait;
 class PClass;
 class PExpr;
 class PFunction;
+class PPackage;
 class PTaskFunc;
 struct enum_type_t;
 class netclass_t;
@@ -553,7 +554,7 @@ class NetDelaySrc  : public NetObj {
 
     public:
       explicit NetDelaySrc(NetScope*s, perm_string n, unsigned nsrc,
-                           bool condit_src, bool conditional);
+                           bool condit_src, bool conditional, bool parallel);
       ~NetDelaySrc();
 
 	// These functions set the delays from the values in the
@@ -589,12 +590,15 @@ class NetDelaySrc  : public NetObj {
       Link&condit_pin();
       const Link&condit_pin() const;
 
+      bool is_parallel() const;
+
       void dump(ostream&, unsigned ind) const;
 
     private:
       uint64_t transition_delays_[12];
       bool condit_flag_;
       bool conditional_;
+      bool parallel_;
       bool posedge_;
       bool negedge_;
 
@@ -942,9 +946,17 @@ class NetScope : public Definitions, public Attrib {
 	   if a unique name couldn't be generated. */
       bool auto_name(const char* prefix, char pad, const char* suffix);
 
+      void add_imports(const map<perm_string,PPackage*>*imports);
+      NetScope*find_import(const Design*des, perm_string name);
+
+      void add_typedefs(const map<perm_string,data_type_t*>*typedefs);
+
+        /* Search the scope hierarchy for the scope where 'type' was defined. */
+      NetScope*find_typedef_scope(const Design*des, data_type_t*type);
+
 	/* Routine to search for the enumeration given a name. It basically
 	 * does what enumeration_for_name() does but searched the hierarchy. */
-      const netenum_t*find_enumeration_for_name(perm_string name);
+      const netenum_t*find_enumeration_for_name(const Design*des, perm_string name);
 
 	/* Parameters exist within a scope, and these methods allow
 	   one to manipulate the set. In these cases, the name is the
@@ -1268,6 +1280,10 @@ class NetScope : public Definitions, public Attrib {
 
       signed char time_unit_, time_prec_;
       bool time_from_timescale_;
+
+      const map<perm_string,PPackage*>*imports_;
+
+      const map<perm_string,data_type_t*>*typedefs_;
 
       NetEvent *events_;
 
@@ -2048,7 +2064,8 @@ class NetExpr  : public LineInfo {
 	// Get the Nexus that are the input to this
 	// expression. Normally this descends down to the reference to
 	// a signal that reads from its input.
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const =0;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const =0;
 
 	// Return a version of myself that is structural. This is used
 	// for converting expressions to gates. The arguments are:
@@ -2091,7 +2108,8 @@ class NetEArrayPattern  : public NetExpr {
       void dump(ostream&) const;
 
       NetEArrayPattern* dup_expr() const;
-      NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                          bool nested_func = false) const;
 
     private:
       std::vector<NetExpr*> items_;
@@ -2124,7 +2142,8 @@ class NetEConst  : public NetExpr {
 
       virtual NetEConst* dup_expr() const;
       virtual NetNet*synthesize(Design*, NetScope*scope, NetExpr*);
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const;
 
       virtual NetExpr*evaluate_function(const LineInfo&loc,
 					map<perm_string,LocalVar>&ctx) const;
@@ -2196,7 +2215,8 @@ class NetECReal  : public NetExpr {
 
       virtual NetECReal* dup_expr() const;
       virtual NetNet*synthesize(Design*, NetScope*scope, NetExpr*);
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const;
 
       virtual NetExpr*evaluate_function(const LineInfo&loc,
 					map<perm_string,LocalVar>&ctx) const;
@@ -2640,7 +2660,8 @@ class NetProc : public virtual LineInfo {
 	// Find the nexa that are input by the statement. This is used
 	// for example by @* to find the inputs to the process for the
 	// sensitivity list.
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const;
 
 	// Find the nexa that are set by the statement. Add the output
 	// values to the set passed as a parameter.
@@ -2748,7 +2769,8 @@ class NetAlloc  : public NetProc {
 
       const NetScope* scope() const;
 
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const;
       virtual void nex_output(NexusSet&);
       virtual bool emit_proc(struct target_t*) const;
       virtual void dump(ostream&, unsigned ind) const;
@@ -2857,7 +2879,8 @@ class NetAssign_ {
 	// being outputs. For example foo[idx] = ... is the l-value
 	// (NetAssign_ object) with a foo l-value and the input
 	// expression idx.
-      NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                          bool nested_func = false) const;
 
 	// Figuring out nex_output to process ultimately comes down to
 	// this method.
@@ -2905,7 +2928,8 @@ class NetAssignBase : public NetProc {
       void set_delay(NetExpr*);
       const NetExpr* get_delay() const;
 
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const;
       virtual void nex_output(NexusSet&o);
 
 
@@ -3023,7 +3047,8 @@ class NetBlock  : public NetProc {
 	// for sequential blocks.
       void emit_recurse(struct target_t*) const;
 
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const;
       virtual void nex_output(NexusSet&);
       virtual bool emit_proc(struct target_t*) const;
       virtual int match_proc(struct proc_match_t*);
@@ -3044,6 +3069,9 @@ class NetBlock  : public NetProc {
  * way the comparisons are performed. Also, it is likely that the
  * target may be able to optimize differently.
  *
+ * Case statements can have unique, unique0, or priority attached to
+ * them. If not otherwise adorned, it is QBASIC.
+ *
  * Case can be one of three types:
  *    EQ  -- All bits must exactly match
  *    EQZ -- z bits are don't care
@@ -3053,13 +3081,15 @@ class NetCase  : public NetProc {
 
     public:
       enum TYPE { EQ, EQX, EQZ };
-      NetCase(TYPE c, NetExpr*ex, unsigned cnt);
+
+      NetCase(ivl_case_quality_t q, TYPE c, NetExpr*ex, unsigned cnt);
       ~NetCase();
 
       void set_case(unsigned idx, NetExpr*ex, NetProc*st);
 
       void prune();
 
+      inline ivl_case_quality_t case_quality() const { return quality_; }
       TYPE type() const;
       const NetExpr*expr() const { return expr_; }
       inline unsigned nitems() const { return items_.size(); }
@@ -3067,7 +3097,8 @@ class NetCase  : public NetProc {
       inline const NetExpr*expr(unsigned idx) const { return items_[idx].guard;}
       inline const NetProc*stat(unsigned idx) const { return items_[idx].statement; }
 
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const;
       virtual void nex_output(NexusSet&out);
 
       bool synth_async(Design*des, NetScope*scope,
@@ -3091,6 +3122,7 @@ class NetCase  : public NetProc {
 			      NexusSet&nex_map, NetBus&nex_out,
 			      NetBus&enables, vector<mask_t>&bitmasks);
 
+      ivl_case_quality_t quality_;
       TYPE type_;
 
       struct Item {
@@ -3147,7 +3179,8 @@ class NetCondit  : public NetProc {
       bool emit_recurse_if(struct target_t*) const;
       bool emit_recurse_else(struct target_t*) const;
 
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const;
       virtual void nex_output(NexusSet&o);
 
       bool is_asynchronous();
@@ -3238,7 +3271,8 @@ class NetDisable  : public NetProc {
 
       const NetScope*target() const;
 
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const;
       virtual void nex_output(NexusSet&);
       virtual bool emit_proc(struct target_t*) const;
       virtual void dump(ostream&, unsigned ind) const;
@@ -3269,7 +3303,8 @@ class NetDoWhile  : public NetProc {
 
       void emit_proc_recurse(struct target_t*) const;
 
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const;
       virtual void nex_output(NexusSet&);
       virtual bool emit_proc(struct target_t*) const;
       virtual void dump(ostream&, unsigned ind) const;
@@ -3403,7 +3438,8 @@ class NetEvTrig  : public NetProc {
 
       const NetEvent*event() const;
 
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const;
       virtual void nex_output(NexusSet&);
       virtual bool emit_proc(struct target_t*) const;
       virtual void dump(ostream&, unsigned ind) const;
@@ -3445,7 +3481,8 @@ class NetEvWait  : public NetProc {
 	// process? This method checks.
       virtual bool is_synchronous();
 
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const;
       virtual void nex_output(NexusSet&out);
 
       virtual bool synth_async(Design*des, NetScope*scope,
@@ -3531,7 +3568,8 @@ class NetForever : public NetProc {
 
       void emit_recurse(struct target_t*) const;
 
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const;
       virtual void nex_output(NexusSet&);
       virtual bool emit_proc(struct target_t*) const;
       virtual void dump(ostream&, unsigned ind) const;
@@ -3555,7 +3593,8 @@ class NetForLoop : public NetProc {
 
       void emit_recurse(struct target_t*) const;
 
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const;
       virtual void nex_output(NexusSet&);
       virtual bool emit_proc(struct target_t*) const;
       virtual void dump(ostream&, unsigned ind) const;
@@ -3593,7 +3632,8 @@ class NetFree   : public NetProc {
 
       const NetScope* scope() const;
 
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const;
       virtual void nex_output(NexusSet&);
       virtual bool emit_proc(struct target_t*) const;
       virtual void dump(ostream&, unsigned ind) const;
@@ -3620,6 +3660,13 @@ class NetFuncDef : public NetBaseDef {
 		 const std::vector<NetExpr*>&pd);
       ~NetFuncDef();
 
+	// Return true if the function returns "void". We still treat
+	// it as a function since we need to check that the contents
+	// meet the requirements of a function, but we need to know
+	// that it is void because it can be evaluated differently.
+      inline bool is_void() const { return result_sig_ == 0; }
+
+	// Non-void functions have a return value as a signal.
       const NetNet*return_sig() const;
 
 	// When we want to evaluate the function during compile time,
@@ -3658,7 +3705,8 @@ class NetPDelay  : public NetProc {
       uint64_t delay() const;
       const NetExpr*expr() const;
 
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const;
       virtual void nex_output(NexusSet&);
 
       virtual bool emit_proc(struct target_t*) const;
@@ -3686,7 +3734,8 @@ class NetRepeat : public NetProc {
       const NetExpr*expr() const;
       void emit_recurse(struct target_t*) const;
 
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const;
       virtual void nex_output(NexusSet&);
       virtual bool emit_proc(struct target_t*) const;
       virtual void dump(ostream&, unsigned ind) const;
@@ -3740,7 +3789,8 @@ class NetSTask  : public NetProc {
 
       const NetExpr* parm(unsigned idx) const;
 
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const;
       virtual void nex_output(NexusSet&);
       virtual bool emit_proc(struct target_t*) const;
       virtual void dump(ostream&, unsigned ind) const;
@@ -3801,7 +3851,8 @@ class NetELast : public NetExpr {
 
       virtual void expr_scan(struct expr_scan_t*) const;
       virtual NetELast*dup_expr() const;
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const;
 
     private:
       NetNet*sig_;
@@ -3830,7 +3881,8 @@ class NetEUFunc  : public NetExpr {
 
       virtual void expr_scan(struct expr_scan_t*) const;
       virtual NetEUFunc*dup_expr() const;
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const;
       virtual NetExpr* eval_tree();
       virtual NetExpr*evaluate_function(const LineInfo&loc,
 					map<perm_string,LocalVar>&ctx) const;
@@ -3866,7 +3918,8 @@ class NetEAccess : public NetExpr {
 
       virtual void expr_scan(struct expr_scan_t*) const;
       virtual NetEAccess*dup_expr() const;
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const;
 
     private:
       NetBranch*branch_;
@@ -3888,7 +3941,8 @@ class NetUTask  : public NetProc {
 
       const NetScope* task() const;
 
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const;
       virtual void nex_output(NexusSet&);
       virtual bool emit_proc(struct target_t*) const;
       virtual void dump(ostream&, unsigned ind) const;
@@ -3914,7 +3968,8 @@ class NetWhile  : public NetProc {
 
       void emit_proc_recurse(struct target_t*) const;
 
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const;
       virtual void nex_output(NexusSet&);
       virtual bool emit_proc(struct target_t*) const;
       virtual void dump(ostream&, unsigned ind) const;
@@ -4058,7 +4113,8 @@ class NetEBinary  : public NetExpr {
       virtual NetExpr* eval_tree();
       virtual NetExpr* evaluate_function(const LineInfo&loc,
 					 map<perm_string,LocalVar>&ctx) const;
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const;
 
       virtual void expr_scan(struct expr_scan_t*) const;
       virtual void dump(ostream&) const;
@@ -4312,7 +4368,8 @@ class NetEConcat  : public NetExpr {
       NetExpr* parm(unsigned idx) const { return parms_[idx]; }
 
       virtual ivl_variable_type_t expr_type() const;
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const;
       virtual bool has_width() const;
       virtual NetEConcat* dup_expr() const;
       virtual NetEConst*  eval_tree();
@@ -4360,7 +4417,8 @@ class NetESelect  : public NetExpr {
 	// sub-expression.
       virtual ivl_variable_type_t expr_type() const;
 
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const;
       virtual bool has_width() const;
       virtual void expr_scan(struct expr_scan_t*) const;
       virtual NetEConst* eval_tree();
@@ -4389,7 +4447,8 @@ class NetEEvent : public NetExpr {
 
       virtual void expr_scan(struct expr_scan_t*) const;
       virtual NetEEvent* dup_expr() const;
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const;
 
       virtual void dump(ostream&os) const;
 
@@ -4412,7 +4471,8 @@ class NetENetenum  : public NetExpr {
 
       virtual void expr_scan(struct expr_scan_t*) const;
       virtual NetENetenum* dup_expr() const;
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const;
 
       virtual void dump(ostream&os) const;
 
@@ -4436,7 +4496,8 @@ class NetENew : public NetExpr {
 
       virtual void expr_scan(struct expr_scan_t*) const;
       virtual NetENew* dup_expr() const;
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const;
 
       virtual void dump(ostream&os) const;
 
@@ -4458,7 +4519,8 @@ class NetENull : public NetExpr {
 
       virtual void expr_scan(struct expr_scan_t*) const;
       virtual NetENull* dup_expr() const;
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const;
 
       virtual void dump(ostream&os) const;
 };
@@ -4484,7 +4546,8 @@ class NetEProperty : public NetExpr {
       ivl_variable_type_t expr_type() const;
       virtual void expr_scan(struct expr_scan_t*) const;
       virtual NetEProperty* dup_expr() const;
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const;
 
       virtual void dump(ostream&os) const;
 
@@ -4509,7 +4572,8 @@ class NetEScope  : public NetExpr {
 
       virtual void expr_scan(struct expr_scan_t*) const;
       virtual NetEScope* dup_expr() const;
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const;
 
       virtual void dump(ostream&os) const;
 
@@ -4526,7 +4590,7 @@ class NetESFunc  : public NetExpr {
 
     public:
       NetESFunc(const char*name, ivl_variable_type_t t,
-		unsigned width, unsigned nprms);
+		unsigned width, unsigned nprms, bool is_overridden =false);
       NetESFunc(const char*name, ivl_type_t rtype, unsigned nprms);
       NetESFunc(const char*name, const netenum_t*enum_type, unsigned nprms);
       ~NetESFunc();
@@ -4543,7 +4607,8 @@ class NetESFunc  : public NetExpr {
 					 map<perm_string,LocalVar>&ctx) const;
 
       virtual ivl_variable_type_t expr_type() const;
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const;
       virtual const netenum_t* enumeration() const;
       virtual void dump(ostream&) const;
 
@@ -4622,6 +4687,7 @@ class NetESFunc  : public NetExpr {
       ivl_variable_type_t type_;
       const netenum_t*enum_type_;
       std::vector<NetExpr*>parms_;
+      bool is_overridden_;
 
       ID built_in_id_() const;
 
@@ -4677,7 +4743,8 @@ class NetEShallowCopy : public NetExpr {
 
       virtual void expr_scan(struct expr_scan_t*) const;
       virtual NetEShallowCopy* dup_expr() const;
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const;
 
       virtual void dump(ostream&os) const;
 
@@ -4700,6 +4767,8 @@ class NetETernary  : public NetExpr {
       NetETernary(NetExpr*c, NetExpr*t, NetExpr*f, unsigned wid, bool signed_flag);
       ~NetETernary();
 
+      const netenum_t* enumeration() const;
+
       const NetExpr*cond_expr() const;
       const NetExpr*true_expr() const;
       const NetExpr*false_expr() const;
@@ -4709,7 +4778,8 @@ class NetETernary  : public NetExpr {
       virtual NetExpr*evaluate_function(const LineInfo&loc,
 					map<perm_string,LocalVar>&ctx) const;
       virtual ivl_variable_type_t expr_type() const;
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const;
       virtual void expr_scan(struct expr_scan_t*) const;
       virtual void dump(ostream&) const;
       virtual NetNet*synthesize(Design*, NetScope*scope, NetExpr*root);
@@ -4764,7 +4834,8 @@ class NetEUnary  : public NetExpr {
       virtual NetNet* synthesize(Design*, NetScope*scope, NetExpr*root);
 
       virtual ivl_variable_type_t expr_type() const;
-      virtual NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      virtual NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                                  bool nested_func = false) const;
       virtual void expr_scan(struct expr_scan_t*) const;
       virtual void dump(ostream&) const;
 
@@ -4840,7 +4911,10 @@ class NetESignal  : public NetExpr {
 
       virtual NetESignal* dup_expr() const;
       NetNet* synthesize(Design*des, NetScope*scope, NetExpr*root);
-      NexusSet* nex_input(bool rem_out = true, bool search_funcs = false) const;
+      NexusSet* nex_input(bool rem_out = true, bool always_sens = false,
+                          bool nested_func = false) const;
+      NexusSet* nex_input_base(bool rem_out, bool always_sens, bool nested_func,
+                               unsigned base, unsigned width) const;
       const netenum_t*enumeration() const;
 
       virtual NetExpr*evaluate_function(const LineInfo&loc,

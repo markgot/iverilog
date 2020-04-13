@@ -1,7 +1,7 @@
 #ifndef IVL_t_dll_H
 #define IVL_t_dll_H
 /*
- * Copyright (c) 2000-2017 Stephen Williams (steve@icarus.com)
+ * Copyright (c) 2000-2020 Stephen Williams (steve@icarus.com)
  *
  *    This source code is free software; you can redistribute it
  *    and/or modify it in source code form under the terms of the GNU
@@ -206,6 +206,7 @@ struct ivl_delaypath_s {
       ivl_nexus_t src;
       ivl_nexus_t condit;
       bool conditional;
+      bool parallel;
       bool posedge;
       bool negedge;
       uint64_t delay[12];
@@ -810,6 +811,7 @@ struct ivl_statement_s {
 	    } block_;
 
 	    struct { /* IVL_ST_CASE, IVL_ST_CASEX, IVL_ST_CASEZ */
+		  ivl_case_quality_t quality;
 		  ivl_expr_t cond;
 		  unsigned ncase;
 		  ivl_expr_t*case_ex;

@@ -1,12 +1,12 @@
 		THE ICARUS VERILOG COMPILATION SYSTEM
-		Copyright 2000-2004 Stephen Williams
+		Copyright 2000-2019 Stephen Williams
 
 
 1.0 What is ICARUS Verilog?
 
 Icarus Verilog is intended to compile ALL of the Verilog HDL as
 described in the IEEE-1364 standard. Of course, it's not quite there
-yet. It does currently handle a mix of structural and behavioral
+yet. It does currently handle a mix of structural and behavioural
 constructs. For a view of the current state of Icarus Verilog, see its
 home page at <http://iverilog.icarus.com/>.
 
@@ -20,13 +20,13 @@ tools.
 
 2.0 Building/Installing Icarus Verilog From Source
 
-If you are starting from source, the build process is designed to be
+If you are starting from the source, the build process is designed to be
 as simple as practical. Someone basically familiar with the target
 system and C/C++ compilation should be able to build the source
 distribution with little effort. Some actual programming skills are
 not required, but helpful in case of problems.
 
-If you are building for Windows, see the mingw.txt file.
+If you are building on Windows, see the mingw.txt file.
 
 2.1 Compile Time Prerequisites
 
@@ -46,8 +46,11 @@ on a UNIX-like system:
 	  to work. MSVC++ 5 and 6 are known to definitely *not* work.
 
 	- bison and flex
+          It has been reported that bison 2.3 on MacOS generates broken
+          code, but bison 3.0.4 works. We recommend using the Fink
+          project version of bison and flex (finkproject.org).
 
-	- gperf 2.7
+	- gperf 3.0 or later
 	  The lexical analyzer doesn't recognize keywords directly,
 	  but instead matches symbols and looks them up in a hash
 	  table in order to get the proper lexical code. The gperf
@@ -56,18 +59,18 @@ on a UNIX-like system:
 	  A version problem with this program is the most common cause
 	  of difficulty. See the Icarus Verilog FAQ.
 
-	- readline 4.2
+	- readline 4.2 or later
 	  On Linux systems, this usually means the readline-devel
 	  rpm. In any case, it is the development headers of readline
 	  that are needed.
 
 	- termcap
-	  The readline library in turn uses termcap.
+	  The readline library, in turn, uses termcap.
 
 If you are building from git, you will also need software to generate
 the configure scripts.
 
-	- autoconf 2.53
+	- autoconf 2.53 or later
 	  This generates configure scripts from configure.in. The 2.53
 	  or later versions are known to work, autoconf 2.13 is
 	  reported to *not* work.
@@ -75,21 +78,21 @@ the configure scripts.
 2.2 Compilation
 
 Unpack the tar-ball and cd into the verilog-######### directory
-(presumably that is how you got to this README) and compile the source
+(presumably, that is how you got to this README) and compile the source
 with the commands:
 
   ./configure
   make
 
 If you are building from git, you have to run the command below before
-compile the source. This will generate the "configure" file, which is
+compiling the source. This will generate the "configure" file, which is
 automatically done when building from tarball.
 
   sh autoconf.sh
 
 Normally, this command automatically figures out everything it needs
 to know. It generally works pretty well. There are a few flags to the
-configure script that modify its behavior:
+configure script that modify its behaviour:
 
 	--prefix=<root>
 	    The default is /usr/local, which causes the tool suite to
@@ -111,6 +114,12 @@ configure script that modify its behavior:
 	    library files and include directory so that installations
 	    with the same prefix but different suffix are guaranteed
 	    to not interfere with each other.
+
+	--host=<host-type>
+	    Compile iverilog for a different platform. You can use:
+                x64_64-w64-mingw32 for building 64-bit Windows executables
+                i686-w64-mingw32 for building 32-bit Windows executables
+            Both options require installing the required mingw-w64 packages.
 
 2.3 (Optional) Testing
 
@@ -161,7 +170,7 @@ output of the parse is a list of Module objects in "pform". The pform
 step. There may be dangling references, and it is not yet clear which
 module is the root.
 
-One can see a human readable version of the final pform by using the
+One can see a human-readable version of the final pform by using the
 ``-P <path>'' flag to the ``ivl'' subcommand. This will cause ivl
 to dump the pform into the file named <path>. (Note that this is not
 normally done, unless debugging the ``ivl'' subcommand.)
@@ -173,17 +182,17 @@ This phase takes the pform and generates a netlist. The driver selects
 resolves references and expands the instantiations to form the design
 netlist. (See netlist.txt.) Final semantic checks are performed during
 elaboration, and some simple optimizations are performed. The netlist
-includes all the behavioral descriptions, as well as gates and wires.
+includes all the behavioural descriptions, as well as gates and wires.
 
 The elaborate() function performs the elaboration.
 
-One can see a human readable version of the final, elaborated and
+One can see a human-readable version of the final, elaborated and
 optimized netlist by using the ``-N <path>'' flag to the compiler. If
 elaboration succeeds, the final netlist (i.e., after optimizations but
 before code generation) will be dumped into the file named <path>.
 
-Elaboration is actually performed in two steps: scopes and parameters
-first, followed by the structural and behavioral elaboration.
+Elaboration is performed in two steps: scopes and parameters
+first, followed by the structural and behavioural elaboration.
 
 3.3.1 Scope Elaboration
 
@@ -192,7 +201,7 @@ tree of NetScope objects is built up and placed in the Design object,
 with the root module represented by the root NetScope object. The
 elab_scope.cc file contains most of the code for handling this phase.
 
-The tail of the elaborate_scope behavior (after the pform is
+The tail of the elaborate_scope behaviour (after the pform is
 traversed) includes a scan of the NetScope tree to locate defparam
 assignments that were collected during scope elaboration. This is when
 the defparam overrides are applied to the parameters.
@@ -201,14 +210,14 @@ the defparam overrides are applied to the parameters.
 
 After the scopes and parameters are generated and the NetScope tree
 fully formed, the elaboration runs through the pform again, this time
-generating the structural and behavioral netlist. Parameters are
+generating the structural and behavioural netlist. Parameters are
 elaborated and evaluated by now so all the constants of code
 generation are now known locally, so the netlist can be generated by
 simply passing through the pform.
 
 3.4 Optimization
 
-This is actually a collection of processing steps that perform
+This is a collection of processing steps that perform
 optimizations that do not depend on the target technology. Examples of
 some useful transformations are
 
@@ -226,7 +235,7 @@ generator (see target.h). This may require transforming the
 design to suit the technology.
 
 The emit() method of the Design class performs this step. It runs
-through the design elements, calling target functions as need arises
+through the design elements, calling target functions as the need arises
 to generate actual output.
 
 The user selects the target code generator with the -t flag on the
@@ -234,7 +243,7 @@ command line.
 
 3.6 ATTRIBUTES
 
-    NOTE: The $attribute syntax will soon be deprecated in favor of the
+    NOTE: The $attribute syntax will soon be deprecated in favour of the
     Verilog-2001 attribute syntax, which is cleaner and standardized.
 
 The parser accepts, as an extension to Verilog, the $attribute module
@@ -257,7 +266,7 @@ Attributes can also be applied to gate types. When this is done, the
 attribute is given to every instantiation of the primitive. The syntax
 for the attribute statement is the same, except that the <identifier>
 names a primitive earlier in the compilation unit and the statement is
-placed in global scope, instead of within a module. The semicolon is
+placed in the global scope, instead of within a module. The semicolon is
 not part of a type attribute.
 
 Note that attributes are also occasionally used for communication
@@ -316,7 +325,7 @@ by the compiler. See the iverilog(1) man page.
 
 Icarus Verilog is in development - as such it still only supports a
 (growing) subset of Verilog.  Below is a description of some of the
-currently unsupported Verilog features. This list is not exhaustive,
+currently unsupported Verilog features. This list is not exhaustive
 and does not account for errors in the compiler. See the Icarus
 Verilog web page for the current state of support for Verilog, and in
 particular, browse the bug report database for reported unsupported
@@ -345,7 +354,7 @@ constructs.
 5.1 Nonstandard Constructs or Behaviors
 
 Icarus Verilog includes some features that are not part of the
-IEEE1364 standard, but have well defined meaning, and also sometimes
+IEEE1364 standard, but have well-defined meaning, and also sometimes
 gives nonstandard (but extended) meanings to some features of the
 language that are defined. See the "extensions.txt" documentation for
 more details.
@@ -362,7 +371,7 @@ more details.
 	function is undefined if the argument doesn't have a
 	self-determined size.
 
-	The $sizeof function is deprecated in favor of $bits, which is
+	The $sizeof function is deprecated in favour of $bits, which is
 	the same thing, but included in the SystemVerilog definition.
 
     $simtime
@@ -388,8 +397,8 @@ more details.
 
     Builtin system functions
 
-	Certain of the system functions have well defined meanings, so
-	can theoretically be evaluated at compile time, instead of
+	Certain of the system functions have well-defined meanings, so
+	can theoretically be evaluated at compile-time, instead of
 	using runtime VPI code. Doing so means that VPI cannot
 	override the definitions of functions handled in this
 	manner. On the other hand, this makes them synthesizable, and
@@ -408,8 +417,8 @@ more details.
 
 	Icarus Verilog does preprocess modules that are loaded from
 	libraries via the -y mechanism. However, the only macros
-	defined during compilation of that file are those that it
-	defines itself (or includes) or that are defined on the
+	defined during the compilation of that file are those that it
+	defines itself (or includes) or that are defined in the
 	command line or command file.
 
 	Specifically, macros defined in the non-library source files
@@ -450,7 +459,7 @@ more details.
 
     time 0 race resolution.
 
-	Combinational logic is routinely modeled using always
+	Combinational logic is routinely modelled using always
 	blocks. However, this can lead to race conditions if the
 	inputs to the combinational block are initialized in initial
 	statements. Icarus Verilog slightly modifies time 0 scheduling
@@ -461,7 +470,7 @@ more details.
 
     Nets with Types
 
-	Icarus Verilog support an extension syntax that allows nets
+	Icarus Verilog supports an extended syntax that allows nets
 	and regs to be explicitly typed. The currently supported types
 	are logic, bool and real. This implies that "logic" and "bool"
 	are new keywords. Typical syntax is:
@@ -478,6 +487,6 @@ more details.
 Except where otherwise noted, Icarus Verilog, ivl and ivlpp are
 Copyright Stephen Williams. The proper notices are in the head of each
 file. However, I have early on received aid in the form of fixes,
-Verilog guidance, and especially testing from many people. Testers in
-particular include a larger community of people interested in a GPL
+Verilog guidance, and especially testing from many people. Testers, in
+particular, include a larger community of people interested in a GPL
 Verilog for Linux.

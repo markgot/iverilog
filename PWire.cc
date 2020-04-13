@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999-2012 Stephen Williams (steve@icarus.com)
+ * Copyright (c) 1999-2019 Stephen Williams (steve@icarus.com)
  *
  *    This source code is free software; you can redistribute it
  *    and/or modify it in source code form under the terms of the GNU
@@ -29,7 +29,7 @@ PWire::PWire(perm_string n,
 : name_(n), type_(t), port_type_(pt), data_type_(dt),
   signed_(false), isint_(false),
   port_set_(false), net_set_(false), is_scalar_(false),
-  error_cnt_(0), set_data_type_(0),
+  error_cnt_(0), uarray_type_(0), set_data_type_(0),
   discipline_(0)
 {
       if (t == NetNet::INTEGER) {
@@ -67,6 +67,7 @@ bool PWire::set_wire_type(NetNet::Type t)
 		  isint_ = true;
 		  return true;
 	    }
+	    if (t == NetNet::IMPLICIT_REG) return true;
 	    return false;
 	  case NetNet::REG:
 	    if (t == NetNet::INTEGER) {
@@ -281,4 +282,16 @@ void PWire::set_discipline(ivl_discipline_t d)
 ivl_discipline_t PWire::get_discipline(void) const
 {
       return discipline_;
+}
+
+PNamedItem::SymbolType PWire::symbol_type() const
+{
+      switch (type_) {
+          case NetNet::IMPLICIT_REG:
+          case NetNet::INTEGER:
+          case NetNet::REG:
+            return VAR;
+          default:
+            return NET;
+    }
 }

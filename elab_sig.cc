@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2017 Stephen Williams (steve@icarus.com)
+ * Copyright (c) 2000-2019 Stephen Williams (steve@icarus.com)
  * Copyright CERN 2012 / Stephen Williams (steve@icarus.com)
  *
  *    This source code is free software; you can redistribute it
@@ -47,6 +47,8 @@
 
 using namespace std;
 
+#if 0
+/* These functions are not currently used. */
 static bool get_const_argument(NetExpr*exp, verinum&res)
 {
       switch (exp->expr_type()) {
@@ -73,8 +75,6 @@ static bool get_const_argument(NetExpr*exp, verinum&res)
       return true;
 }
 
-#if 0
-/* This function is not currently used. */
 static bool get_const_argument(NetExpr*exp, long&res)
 {
       verinum tmp;
@@ -757,6 +757,11 @@ void PTaskFunc::elaborate_sig_ports_(Design*des, NetScope*scope,
 		       << "Function arguments must be input ports." << endl;
 		  des->errors += 1;
 	    }
+	    if (tmp->unpacked_dimensions() != 0) {
+		  cerr << get_fileline() << ": sorry: Subroutine ports with "
+			  "unpacked dimensions are not yet supported." << endl;
+		 des->errors += 1;
+	    }
       }
 }
 
@@ -871,13 +876,13 @@ static ivl_type_s*elaborate_type(Design*des, NetScope*scope,
       return 0;
 }
 
-static netparray_t* elaborate_parray_type(Design*des, NetScope*scope,
+static netparray_t* elaborate_parray_type(Design*des, NetScope*scope, const LineInfo*li,
 					  parray_type_t*data_type)
 {
 
       vector<netrange_t>packed_dimensions;
-      bool bad_range = evaluate_ranges(des, scope, packed_dimensions, * data_type->dims);
-      ivl_assert(*data_type, !bad_range);
+      bool dimensions_ok = evaluate_ranges(des, scope, li, packed_dimensions, * data_type->dims);
+      ivl_assert(*data_type, dimensions_ok);
 
       ivl_type_s*element_type = elaborate_type(des, scope, data_type->base_type);
 
@@ -927,53 +932,34 @@ NetNet* PWire::elaborate_sig(Design*des, NetScope*scope) const
 	    wtype = NetNet::WIRE;
 	    is_implicit_scalar = true;
       }
+	// Certain contexts, such as arguments to functions, presume
+	// "reg" instead of "wire". The parser reports these as
+	// IMPLICIT_REG. Also, certain cases, such as:
+	//   fun(string arg1) ...
+	// are implicitly NOT scalar, so detect that case here.
       if (wtype == NetNet::IMPLICIT_REG) {
 	    wtype = NetNet::REG;
-	    is_implicit_scalar = true;
+	    if (data_type_!=IVL_VT_STRING)
+		  is_implicit_scalar = true;
+      }
+
+      if (debug_elaborate) {
+	    cerr << get_fileline() << ": PWire::elaborate_sig: "
+		 << "Signal " << basename()
+		 << ", wtype=" << wtype
+		 << ", data_type_=" << data_type_
+		 << ", is_implicit_scalar=" << (is_implicit_scalar?"true":"false")
+		 << endl;
       }
 
       unsigned wid = 1;
       vector<netrange_t>packed_dimensions;
 
-      des->errors += error_cnt_;
+      NetScope*base_type_scope = scope;
+      if (set_data_type_ && !set_data_type_->name.nil())
+            base_type_scope = scope->find_typedef_scope(des, set_data_type_);
 
-	// A signal can not have the same name as a scope object.
-      const NetScope *child = scope->child_byname(name_);
-      if (child) {
-	    cerr << get_fileline() << ": error: signal and ";
-	    child->print_type(cerr);
-	    cerr << " in '" << scope->fullname()
-	         << "' have the same name '" << name_ << "'." << endl;
-	    des->errors += 1;
-      }
-	// A signal can not have the same name as a genvar.
-      const LineInfo *genvar = scope->find_genvar(name_);
-      if (genvar) {
-	    cerr << get_fileline() << ": error: signal and genvar in '"
-	         << scope->fullname() << "' have the same name '" << name_
-	         << "'." << endl;
-	    des->errors += 1;
-      }
-	// A signal can not have the same name as a parameter. Note
-	// that we treat enumeration literals similar to parameters,
-	// so if the name matches an enumeration literal, it will be
-	// caught here.
-      const NetExpr *ex_msb, *ex_lsb;
-      const NetExpr *parm = scope->get_parameter(des, name_, ex_msb, ex_lsb);
-      if (parm) {
-	    cerr << get_fileline() << ": error: signal and parameter in '"
-	         << scope->fullname() << "' have the same name '" << name_
-	         << "'." << endl;
-	    des->errors += 1;
-      }
-	// A signal can not have the same name as a named event.
-      const NetEvent *event = scope->find_event(name_);
-      if (event) {
-	    cerr << get_fileline() << ": error: signal and named event in '"
-	         << scope->fullname() << "' have the same name '" << name_
-	         << "'." << endl;
-	    des->errors += 1;
-      }
+      des->errors += error_cnt_;
 
       if (port_set_ || net_set_) {
 
@@ -993,7 +979,7 @@ NetNet* PWire::elaborate_sig(Design*des, NetScope*scope) const
 		       << " inherits dimensions from var/net." << endl;
 	    }
 
-	    bool bad_range = false;
+	    bool dimensions_ok = true;
 	    vector<netrange_t> plist, nlist;
 	    /* If they exist get the port definition MSB and LSB */
 	    if (port_set_ && !port_.empty()) {
@@ -1001,7 +987,7 @@ NetNet* PWire::elaborate_sig(Design*des, NetScope*scope) const
 			cerr << get_fileline() << ": PWire::elaborate_sig: "
 			     << "Evaluate ranges for port " << basename() << endl;
 		  }
-		  bad_range |= evaluate_ranges(des, scope, plist, port_);
+		  dimensions_ok &= evaluate_ranges(des, scope, this, plist, port_);
 		  nlist = plist;
 		    /* An implicit port can have a range so note that here. */
 		  is_implicit_scalar = false;
@@ -1009,13 +995,13 @@ NetNet* PWire::elaborate_sig(Design*des, NetScope*scope) const
             assert(port_set_ || port_.empty());
 
 	    /* If they exist get the net/etc. definition MSB and LSB */
-	    if (net_set_ && !net_.empty() && !bad_range) {
+	    if (net_set_ && !net_.empty() && dimensions_ok) {
 		  nlist.clear();
 		  if (debug_elaborate) {
 			cerr << get_fileline() << ": PWire::elaborate_sig: "
 			     << "Evaluate ranges for net " << basename() << endl;
 		  }
-		  bad_range |= evaluate_ranges(des, scope, nlist, net_);
+		  dimensions_ok &= evaluate_ranges(des, base_type_scope, this, nlist, net_);
 	    }
             assert(net_set_ || net_.empty());
 
@@ -1086,6 +1072,10 @@ NetNet* PWire::elaborate_sig(Design*des, NetScope*scope) const
       list<netrange_t>unpacked_dimensions;
       netdarray_t*netdarray = 0;
 
+      NetScope*array_type_scope = scope;
+      if (uarray_type_ && !uarray_type_->name.nil())
+            array_type_scope = scope->find_typedef_scope(des, uarray_type_);
+
       for (list<pform_range_t>::const_iterator cur = unpacked_.begin()
 		 ; cur != unpacked_.end() ; ++cur) {
 	    PExpr*use_lidx = cur->first;
@@ -1116,39 +1106,10 @@ NetNet* PWire::elaborate_sig(Design*des, NetScope*scope) const
 
 	      // Cannot handle dynamic arrays of arrays yet.
 	    ivl_assert(*this, netdarray==0);
-	    ivl_assert(*this, use_lidx && use_ridx);
-
-	    NetExpr*lexp = elab_and_eval(des, scope, use_lidx, -1, true);
-	    NetExpr*rexp = elab_and_eval(des, scope, use_ridx, -1, true);
-
-	    if ((lexp == 0) || (rexp == 0)) {
-		  cerr << get_fileline() << ": internal error: There is "
-		       << "a problem evaluating indices for ``"
-		       << name_ << "''." << endl;
-		  des->errors += 1;
-		  return 0;
-	    }
-
-	    bool const_flag = true;
-	    verinum lval, rval;
-	    const_flag &= get_const_argument(lexp, lval);
-	    const_flag &= get_const_argument(rexp, rval);
-	    delete rexp;
-	    delete lexp;
 
 	    long index_l, index_r;
-	    if (! const_flag) {
-		  cerr << get_fileline() << ": error: The indices "
-		       << "are not constant for array ``"
-		       << name_ << "''." << endl;
-		  des->errors += 1;
-                    /* Attempt to recover from error, */
-	          index_l = 0;
-	          index_r = 0;
-	    } else {
-		  index_l = lval.as_long();
-		  index_r = rval.as_long();
-	    }
+	    evaluate_range(des, array_type_scope, this, *cur, index_l, index_r);
+
 	    if (abs(index_r - index_l) > warn_dimension_size) {
 		  cerr << get_fileline() << ": warning: Array dimension "
 		          "is greater than " << warn_dimension_size
@@ -1238,7 +1199,7 @@ NetNet* PWire::elaborate_sig(Design*des, NetScope*scope) const
 
       } else if (enum_type_t*enum_type = dynamic_cast<enum_type_t*>(set_data_type_)) {
 	    list<named_pexpr_t>::const_iterator sample_name = enum_type->names->begin();
-	    const netenum_t*use_enum = scope->find_enumeration_for_name(sample_name->name);
+	    const netenum_t*use_enum = base_type_scope->find_enumeration_for_name(des, sample_name->name);
 
 	    if (debug_elaborate) {
 		  cerr << get_fileline() << ": debug: Create signal " << wtype
@@ -1271,7 +1232,7 @@ NetNet* PWire::elaborate_sig(Design*des, NetScope*scope) const
 
 	      // The trick here is that the parray type has an
 	      // arbitrary sub-type, and not just a scalar bit...
-	    netparray_t*use_type = elaborate_parray_type(des, scope, parray_type);
+	    netparray_t*use_type = elaborate_parray_type(des, scope, this, parray_type);
 	      // Should not be getting packed dimensions other than
 	      // through the parray type declaration.
 	    ivl_assert(*this, packed_dimensions.empty());

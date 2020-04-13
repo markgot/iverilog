@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2017 Stephen Williams (steve@icarus.com)
+ * Copyright (c) 2012-2019 Stephen Williams (steve@icarus.com)
  *
  *    This source code is free software; you can redistribute it
  *    and/or modify it in source code form under the terms of the GNU
@@ -78,6 +78,11 @@ static void elaborate_array_ranges(Design*des, NetScope*scope,
  */
 ivl_type_s* data_type_t::elaborate_type(Design*des, NetScope*scope)
 {
+	// User-defined types must be elaborated in the context
+	// where they were defined.
+      if (!name.nil())
+	    scope = scope->find_typedef_scope(des, this);
+
       ivl_assert(*this, scope);
       Definitions*use_definitions = scope;
 
@@ -215,9 +220,9 @@ netstruct_t* struct_type_t::elaborate_type_raw(Design*des, NetScope*scope) const
 	      // There may be several names that are the same type:
 	      //   <data_type> name1, name2, ...;
 	      // Process all the member, and give them a type.
-	    for (list<decl_assignment_t*>::iterator name = curp->names->begin()
-		       ; name != curp->names->end() ;  ++ name) {
-		  decl_assignment_t*namep = *name;
+	    for (list<decl_assignment_t*>::iterator cur_name = curp->names->begin()
+		       ; cur_name != curp->names->end() ;  ++ cur_name) {
+		  decl_assignment_t*namep = *cur_name;
 
 		  netstruct_t::member_t memb;
 		  memb.name = namep->name;
@@ -257,9 +262,9 @@ ivl_type_s* uarray_type_t::elaborate_type_raw(Design*des, NetScope*scope) const
       }
 
       vector<netrange_t> dimensions;
-      bool bad_range = evaluate_ranges(des, scope, dimensions, *dims);
+      bool dimensions_ok = evaluate_ranges(des, scope, this, dimensions, *dims);
 
-      if (bad_range) {
+      if (!dimensions_ok) {
 	    cerr << get_fileline() << " : warning: "
 		 << "Bad dimensions for type here." << endl;
       }

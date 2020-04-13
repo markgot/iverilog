@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001-2017 Stephen Williams (steve@icarus.com)
+ * Copyright (c) 2001-2019 Stephen Williams (steve@icarus.com)
  *
  */
 
@@ -257,6 +257,26 @@ value stack.
 
 Pop a value from the vec4 stack, convert it using Verilog rules to a
 vector2 (binary) value, and push the result.
+
+* %cast/vec2/dar <wid>
+
+Pop a dynamic array value from the object stack, convert it to a 2-state
+vector that is <wid> bits wide, and push the result to the vec4 stack.
+If the dynamic array does not fit exactly in <wid> bits, print an error
+message and stop the simulation.
+
+* %cast/vec4/dar <wid>
+
+Pop a dynamic array value from the object stack, convert it to a 4-state
+vector that is <wid> bits wide, and push the result to the vec4 stack.
+If the dynamic array does not fit exactly in <wid> bits, print an error
+message and stop the simulation.
+
+* %cast/vec4/str <wid>
+
+Pop a value from the string stack, convert it to a vector that is <wid>
+bits wide, and push the result to the vec4 stack. If the string does not
+fit exactly in <wid> bits, print an error message and stop the simulation.
 
 * %cmp/s
 * %cmp/u
@@ -601,12 +621,13 @@ or z, then the index register gets the value 0. The %ix/vec4/s
 instruction is the same, except that it assumes the source vector is
 sign extended to fit the index register.
 
-The instruction also writes into bit 4 a 1 if any of the bits of the
+The instruction also writes into flag 4 a 1 if any of the bits of the
 input vector are x or z. This is a flag that the 0 value written into
 the index register is really the result of calculating from unknown
-bits.
+bits. It writes an X into flag 4 if the vec4 value overflows the index
+register.
 
-	4: unknown value
+	4: unknown value or overflow
 	5: (reserved)
 	6: (reserved)
 
@@ -614,8 +635,8 @@ bits.
 * %ix/getv/s <idx>, <functor-label>
 
 These instructions are like the %ix/vec4 instructions, except that they
-read directly from a functor label instead of from thread bits. They
-set bit 4 just like %ix/get.
+read directly from a functor label instead of from thread bits. They set
+flag 4 just like %ix/get (overflow is not currently checked by ix/getv/s).
 
 * %ix/load <idx>, <low>, <high>
 
@@ -1085,8 +1106,6 @@ register that contains the amount to shift.
 The instruction also checks flag bit 4. If it is true, the result is
 replaced with X instead of a shifted result. This is intended to
 detect that the index contents were not valid.
-
-For a negative shift, %shiftr will pad the value with 'bx.
 
 * %split/vec4 <wid>
 

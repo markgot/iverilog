@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2017 Stephen Williams (steve@icarus.com)
+ * Copyright (c) 2000-2019 Stephen Williams (steve@icarus.com)
  * Copyright (c) 2016 CERN Michele Castellana (michele.castellana@cern.ch)
  *
  *    This source code is free software; you can redistribute it
@@ -25,6 +25,7 @@
 # include  "netclass.h"
 # include  "netenum.h"
 # include  "netvector.h"
+# include  "PPackage.h"
 # include  <cstring>
 # include  <cstdlib>
 # include  <sstream>
@@ -117,6 +118,8 @@ NetScope::NetScope(NetScope*up, const hname_t&n, NetScope::TYPE t, NetScope*in_u
 : type_(t), name_(n), nested_module_(nest), program_block_(program),
   is_interface_(interface), is_unit_(compilation_unit), unit_(in_unit), up_(up)
 {
+      imports_ = 0;
+      typedefs_ = 0;
       events_ = 0;
       lcounter_ = 0;
       is_auto_ = false;
@@ -128,7 +131,6 @@ NetScope::NetScope(NetScope*up, const hname_t&n, NetScope::TYPE t, NetScope*in_u
 	    unit_ = this;
 
       if (up) {
-	    assert(t!=CLASS);
 	    need_const_func_ = up->need_const_func_;
 	    is_const_func_ = up->is_const_func_;
 	    time_unit_ = up->time_unit();
@@ -205,16 +207,70 @@ void NetScope::set_line(perm_string file, perm_string def_file,
       def_lineno_ = def_lineno;
 }
 
+void NetScope::add_imports(const map<perm_string,PPackage*>*imports)
+{
+      if (!imports->empty())
+	    imports_ = imports;
+}
+
+NetScope*NetScope::find_import(const Design*des, perm_string name)
+{
+      if (imports_ == 0)
+	    return 0;
+
+      map<perm_string,PPackage*>::const_iterator cur = imports_->find(name);
+      if (cur != imports_->end()) {
+            return des->find_package(cur->second->pscope_name());
+      } else
+            return 0;
+}
+
+void NetScope::add_typedefs(const map<perm_string,data_type_t*>*typedefs)
+{
+      if (!typedefs->empty())
+	    typedefs_ = typedefs;
+}
+
+NetScope*NetScope::find_typedef_scope(const Design*des, data_type_t*type)
+{
+      assert(type);
+
+      NetScope *cur_scope = this;
+      while (cur_scope) {
+	    if (cur_scope->typedefs_ && cur_scope->typedefs_->find(type->name) != cur_scope->typedefs_->end())
+		  return cur_scope;
+	    NetScope*import_scope = cur_scope->find_import(des, type->name);
+	    if (import_scope)
+		  cur_scope = import_scope;
+	    else if (cur_scope == unit_)
+		  return 0;
+	    else
+		  cur_scope = cur_scope->parent();
+
+	    if (cur_scope == 0)
+		  cur_scope = unit_;
+      }
+
+      return 0;
+}
+
 /*
  * Look for the enumeration in the current scope and any parent scopes.
  */
-const netenum_t*NetScope::find_enumeration_for_name(perm_string name)
+const netenum_t*NetScope::find_enumeration_for_name(const Design*des, perm_string name)
 {
       NetScope *cur_scope = this;
       while (cur_scope) {
 	    NetEConstEnum*tmp = cur_scope->enum_names_[name];
 	    if (tmp) break;
-	    cur_scope = cur_scope->parent();
+	    NetScope*import_scope = cur_scope->find_import(des, name);
+	    if (import_scope)
+		  cur_scope = import_scope;
+	    else if (cur_scope == unit_)
+		  return 0;
+	    else
+		  cur_scope = cur_scope->parent();
+
 	    if (cur_scope == 0)
 		  cur_scope = unit_;
       }
@@ -743,9 +799,28 @@ const NetScope* NetScope::child_byname(perm_string name) const
 
 perm_string NetScope::local_symbol()
 {
-      ostringstream res;
-      res << "_s" << (lcounter_++);
-      return lex_strings.make(res.str());
+      perm_string sym;
+      do {
+	    ostringstream res;
+	    res << "_ivl_" << (lcounter_++);
+	    perm_string sym_tmp = lex_strings.make(res.str());
+
+	      // If the name already exists as a signal, try again.
+	    if (signals_map_.find(sym_tmp) != signals_map_.end())
+		  continue;
+	      // If the name already exists as a parameter, try again.
+	    if (parameters.find(sym_tmp) != parameters.end())
+		  continue;
+	    if (genvars_.find(sym_tmp) != genvars_.end())
+		  continue;
+	      // If the name already exists as a class, try again.
+	    if (classes_.find(sym_tmp) != classes_.end())
+		  continue;
+
+	      // No collisions, this is the one.
+	    sym = sym_tmp;
+      } while (sym.nil());
+      return sym;
 }
 
 void NetScope::add_tie_hi(Design*des)

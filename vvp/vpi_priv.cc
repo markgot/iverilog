@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018 Stephen Williams (steve@icarus.com)
+ * Copyright (c) 2008-2019 Stephen Williams (steve@icarus.com)
  *
  *    This source code is free software; you can redistribute it
  *    and/or modify it in source code form under the terms of the GNU
@@ -1293,7 +1293,7 @@ static vpiHandle find_name(const char *name, vpiHandle handle)
 	       * to skip ports here so the correct handle can be located. */
 	    if (vpi_get(vpiType, ref->intern[i]) == vpiPort) continue;
 	    char *nm = vpi_get_str(vpiName, ref->intern[i]);
-	    if (!strcmp(name, nm)) {
+	    if (nm && !strcmp(name, nm)) {
 		  rtn = ref->intern[i];
 		  break;
 	    } else if (vpi_get(vpiType, ref->intern[i]) == vpiMemory ||
@@ -1303,7 +1303,7 @@ static vpiHandle find_name(const char *name, vpiHandle handle)
 		  word_i = vpi_iterate(vpiMemoryWord, ref->intern[i]);
 		  while (word_i && (word_h = vpi_scan(word_i))) {
 			nm = vpi_get_str(vpiName, word_h);
-			if (!strcmp(name, nm)) {
+			if (nm && !strcmp(name, nm)) {
 			      rtn = word_h;
 			      vpi_free_object(word_i);
 			      break;
@@ -1634,3 +1634,46 @@ extern "C" void vpip_count_drivers(vpiHandle ref, unsigned idx,
       assert(rfp);
       rfp->node->count_drivers(idx, counts);
 }
+
+#if defined(__MINGW32__) || defined (__CYGWIN32__)
+vpip_routines_s vpi_routines = {
+    .register_cb                = vpi_register_cb,
+    .remove_cb                  = vpi_remove_cb,
+    .register_systf             = vpi_register_systf,
+    .get_systf_info             = vpi_get_systf_info,
+    .handle_by_name             = vpi_handle_by_name,
+    .handle_by_index            = vpi_handle_by_index,
+    .handle                     = vpi_handle,
+    .iterate                    = vpi_iterate,
+    .scan                       = vpi_scan,
+    .get                        = vpi_get,
+    .get_str                    = vpi_get_str,
+    .get_delays                 = vpi_get_delays,
+    .put_delays                 = vpi_put_delays,
+    .get_value                  = vpi_get_value,
+    .put_value                  = vpi_put_value,
+    .get_time                   = vpi_get_time,
+    .get_userdata               = vpi_get_userdata,
+    .put_userdata               = vpi_put_userdata,
+    .mcd_open                   = vpi_mcd_open,
+    .mcd_close                  = vpi_mcd_close,
+    .mcd_flush                  = vpi_mcd_flush,
+    .mcd_name                   = vpi_mcd_name,
+    .mcd_vprintf                = vpi_mcd_vprintf,
+    .flush                      = vpi_flush,
+    .vprintf                    = vpi_vprintf,
+    .chk_error                  = vpi_chk_error,
+    .compare_objects            = vpi_compare_objects,
+    .free_object                = vpi_free_object,
+    .get_vlog_info              = vpi_get_vlog_info,
+    .vcontrol                   = vpi_sim_vcontrol,
+    .fopen                      = vpi_fopen,
+    .get_file                   = vpi_get_file,
+    .calc_clog2                 = vpip_calc_clog2,
+    .count_drivers              = vpip_count_drivers,
+    .format_strength            = vpip_format_strength,
+    .make_systf_system_defined  = vpip_make_systf_system_defined,
+    .mcd_rawwrite               = vpip_mcd_rawwrite,
+    .set_return_value           = vpip_set_return_value,
+};
+#endif

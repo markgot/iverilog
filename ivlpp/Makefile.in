@@ -60,7 +60,7 @@ distclean: clean
 	rm -f Makefile config.log
 
 cppcheck: $(O:.o=.c)
-	cppcheck --enable=all -f $(INCLUDE_PATH) $^
+	cppcheck --enable=all --std=posix --std=c99 --std=c++03 -f $(INCLUDE_PATH) $^
 
 Makefile: $(srcdir)/Makefile.in ../config.status
 	cd ..; ./config.status --file=ivlpp/$@
@@ -71,9 +71,11 @@ ivlpp@EXEEXT@: $O
 lexor.c: $(srcdir)/lexor.lex
 	$(LEX) -t $< > $@
 
-install: all installdirs $(libdir)/ivl$(suffix)/ivlpp@EXEEXT@
+install: all installdirs installfiles
 
-$(libdir)/ivl$(suffix)/ivlpp@EXEEXT@: ivlpp@EXEEXT@
+F = ivlpp@EXEEXT@
+
+installfiles: $(F) | installdirs
 	$(INSTALL_PROGRAM) ./ivlpp@EXEEXT@ "$(DESTDIR)$(libdir)/ivl$(suffix)/ivlpp@EXEEXT@"
 
 installdirs: $(srcdir)/../mkinstalldirs

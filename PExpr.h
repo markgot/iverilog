@@ -1,7 +1,7 @@
 #ifndef IVL_PExpr_H
 #define IVL_PExpr_H
 /*
- * Copyright (c) 1998-2016 Stephen Williams <steve@icarus.com>
+ * Copyright (c) 1998-2019 Stephen Williams <steve@icarus.com>
  * Copyright CERN 2013 / Stephen Williams (steve@icarus.com)
  *
  *    This source code is free software; you can redistribute it
@@ -379,6 +379,8 @@ class PEIdent : public PExpr {
 
       virtual bool is_collapsible_net(Design*des, NetScope*scope) const;
 
+      const PPackage* package() const { return package_; }
+
       const pform_name_t& path() const { return path_; }
 
     private:
@@ -433,10 +435,10 @@ class PEIdent : public PExpr {
 				   bool need_const_idx) const;
       NetAssign_*elaborate_lval_net_class_member_(Design*, NetScope*,
 						   NetNet*,
-						   const perm_string&) const;
+						   pform_name_t) const;
       bool elaborate_lval_net_packed_member_(Design*, NetScope*,
 					     NetAssign_*,
-					     const name_component_t&) const;
+					     pform_name_t member_path) const;
       bool elaborate_lval_darray_bit_(Design*, NetScope*,
 				       NetAssign_*) const;
 
@@ -521,17 +523,13 @@ class PEIdent : public PExpr {
 					   unsigned flags) const;
 
       unsigned test_width_method_(Design*des, NetScope*scope, width_mode_t&mode);
-      NetExpr*elaborate_expr_method_(Design*des,
-				     NetScope*scope,
-				     unsigned expr_wid,
-				     unsigned flags) const;
+
 
     private:
       NetNet* elaborate_lnet_common_(Design*des, NetScope*scope,
 				     bool bidirectional_flag) const;
 
-      NetAssign_*scan_lname_for_nested_members_(Design*des, NetScope*scope,
-						       const pform_name_t&path) const;
+
       bool eval_part_select_(Design*des, NetScope*scope, NetNet*sig,
 			     long&midx, long&lidx) const;
 };
@@ -929,6 +927,9 @@ class PECallFunction : public PExpr {
       PPackage*package_;
       pform_name_t path_;
       std::vector<PExpr *> parms_;
+
+        // For system functions.
+      bool is_overridden_;
 
       bool check_call_matches_definition_(Design*des, NetScope*dscope) const;
 

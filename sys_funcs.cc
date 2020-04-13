@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2004-2010 Stephen Williams (steve@icarus.com)
+ * Copyright (c) 2004-2019 Stephen Williams (steve@icarus.com)
  *
  *    This source code is free software; you can redistribute it
  *    and/or modify it in source code form under the terms of the GNU
@@ -29,26 +29,31 @@
  * via the lookup_sys_func function.
  */
 
-static const struct sfunc_return_type sfunc_table[] = {
-      { "$realtime",   IVL_VT_REAL,   1, 0 },
-      { "$bitstoreal", IVL_VT_REAL,   1, 0 },
-      { "$itor",       IVL_VT_REAL,   1, 0 },
-      { "$realtobits", IVL_VT_LOGIC, 64, 0 },
-      { "$time",       IVL_VT_LOGIC, 64, 0 },
-      { "$stime",      IVL_VT_LOGIC, 32, 0 },
-      { "$simtime",    IVL_VT_LOGIC, 64, 0 },
-      { 0,             IVL_VT_LOGIC, 32, 0 }
-};
+static const struct sfunc_return_type default_return_type =
+    { 0, IVL_VT_LOGIC, 32, false, false };
 
 struct sfunc_return_type_cell : sfunc_return_type {
       struct sfunc_return_type_cell*next;
 };
 
-static struct sfunc_return_type_cell*sfunc_stack = 0;
+static struct sfunc_return_type_cell*sfunc_list_head = 0;
+static struct sfunc_return_type_cell*sfunc_list_tail = 0;
+
+void append_to_list(struct sfunc_return_type_cell*cell)
+{
+      if (sfunc_list_tail) {
+	    sfunc_list_tail->next = cell;
+	    sfunc_list_tail = cell;
+      } else {
+	    sfunc_list_head = cell;
+	    sfunc_list_tail = cell;
+      }
+      cell->next = 0;
+}
 
 void cleanup_sys_func_table()
 {
-      struct sfunc_return_type_cell *next, *cur = sfunc_stack;
+      struct sfunc_return_type_cell *next, *cur = sfunc_list_head;
       while (cur) {
 	    next = cur->next;
 	    delete cur;
@@ -56,10 +61,9 @@ void cleanup_sys_func_table()
       }
 }
 
-const struct sfunc_return_type* lookup_sys_func(const char*name)
+static struct sfunc_return_type* find_in_sys_func_list(const char*name)
 {
-	/* First, try to find the name in the function stack. */
-      struct sfunc_return_type_cell*cur = sfunc_stack;
+      struct sfunc_return_type_cell*cur = sfunc_list_head;
       while (cur) {
 	    if (strcmp(cur->name, name) == 0)
 		  return cur;
@@ -67,19 +71,36 @@ const struct sfunc_return_type* lookup_sys_func(const char*name)
 	    cur = cur->next;
       }
 
-	/* Next, look in the core table. */
-      unsigned idx = 0;
-      while (sfunc_table[idx].name) {
+      return 0;
+}
 
-	    if (strcmp(sfunc_table[idx].name, name) == 0)
-		  return sfunc_table + idx;
+const struct sfunc_return_type* lookup_sys_func(const char*name)
+{
+	/* First, try to find the name in the function list. */
+      struct sfunc_return_type*def = find_in_sys_func_list(name);
+      if (def)
+	    return def;
 
-	    idx += 1;
+	/* No luck finding, so return the default description. */
+      return &default_return_type;
+}
+
+void add_sys_func(const struct sfunc_return_type&ret_type)
+{
+      struct sfunc_return_type*def = find_in_sys_func_list(ret_type.name);
+      if (def) {
+              /* Keep the original definition, but flag that it
+                 overrides a later definition. */
+            def->override_flag = true;
+            return;
       }
-
-	/* No luck finding, so return the trailer, which give a
-	   default description. */
-      return sfunc_table + idx;
+      struct sfunc_return_type_cell*cell = new struct sfunc_return_type_cell;
+      cell->name = lex_strings.add(ret_type.name);
+      cell->type = ret_type.type;
+      cell->wid  = ret_type.wid;
+      cell->signed_flag = ret_type.signed_flag;
+      cell->override_flag = ret_type.override_flag;
+      append_to_list(cell);
 }
 
 /*
@@ -87,6 +108,10 @@ const struct sfunc_return_type* lookup_sys_func(const char*name)
  * format:
  *
  *    <name> <type> [<arguments>]
+ *
+ * The driver passes us user-provided tables first, so we add new entries
+ * to the end of the list. This allows user-defined functions to override
+ * built-in functions.
  */
 int load_sys_func_table(const char*path)
 {
@@ -130,14 +155,22 @@ int load_sys_func_table(const char*path)
 	    cp = stype + strcspn(stype, " \t\r\n");
 	    if (cp[0]) *cp++ = 0;
 
+            struct sfunc_return_type*def = find_in_sys_func_list(name);
+            if (def) {
+                    /* Keep the original definition, but flag that it
+                       overrides a later definition. */
+                  def->override_flag = true;
+                  continue;
+            }
+
 	    if (strcmp(stype,"vpiSysFuncReal") == 0) {
 		  cell = new struct sfunc_return_type_cell;
 		  cell->name = lex_strings.add(name);
 		  cell->type = IVL_VT_REAL;
 		  cell->wid  = 1;
 		  cell->signed_flag = true;
-		  cell->next = sfunc_stack;
-		  sfunc_stack = cell;
+		  cell->override_flag = false;
+		  append_to_list(cell);
 		  continue;
 	    }
 
@@ -147,8 +180,8 @@ int load_sys_func_table(const char*path)
 		  cell->type = IVL_VT_LOGIC;
 		  cell->wid  = 32;
 		  cell->signed_flag = true;
-		  cell->next = sfunc_stack;
-		  sfunc_stack = cell;
+		  cell->override_flag = false;
+		  append_to_list(cell);
 		  continue;
 	    }
 
@@ -188,8 +221,8 @@ int load_sys_func_table(const char*path)
 		  cell->type = IVL_VT_LOGIC;
 		  cell->wid  = width;
 		  cell->signed_flag = signed_flag;
-		  cell->next = sfunc_stack;
-		  sfunc_stack = cell;
+		  cell->override_flag = false;
+		  append_to_list(cell);
 		  continue;
 	    }
 
@@ -199,8 +232,8 @@ int load_sys_func_table(const char*path)
 		  cell->type = IVL_VT_VOID;
 		  cell->wid  = 0;
 		  cell->signed_flag = false;
-		  cell->next = sfunc_stack;
-		  sfunc_stack = cell;
+		  cell->override_flag = false;
+		  append_to_list(cell);
 		  continue;
 	    }
 
@@ -210,8 +243,8 @@ int load_sys_func_table(const char*path)
 		  cell->type = IVL_VT_STRING;
 		  cell->wid  = 0;   // string is a dynamic length type
 		  cell->signed_flag = false;
-		  cell->next = sfunc_stack;
-		  sfunc_stack = cell;
+		  cell->override_flag = false;
+		  append_to_list(cell);
 		  continue;
 	    }
 

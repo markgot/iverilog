@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2017 Stephen Williams (steve@icarus.com)
+ * Copyright (c) 2013-2019 Stephen Williams (steve@icarus.com)
  *
  *    This source code is free software; you can redistribute it
  *    and/or modify it in source code form under the terms of the GNU
@@ -117,13 +117,18 @@ static void draw_binary_vec4_arith(ivl_expr_t expr)
       unsigned rwid = ivl_expr_width(re);
       unsigned ewid = ivl_expr_width(expr);
 
-      int signed_flag = ivl_expr_signed(le) && ivl_expr_signed(re) ? 1 : 0;
+      int is_power_op = ivl_expr_opcode(expr) == 'p' ? 1 : 0;
+
+	/* The power operation differs from the other arithmetic operations
+	   in that we only use the signed version of the operation if the
+	   right hand operand (the exponent) is signed. */
+      int signed_flag = (ivl_expr_signed(le) || is_power_op) && ivl_expr_signed(re) ? 1 : 0;
       const char*signed_string = signed_flag? "/s" : "";
 
-	/* All the arithmetic operations handled here require that the
-	   operands (and the result) be the same width. We further
-	   assume that the core has not given us an operand wider then
-	   the expression width. So padd operands as needed. */
+	/* All the arithmetic operations handled here (except for the power
+	   operation) require that the operands (and the result) be the same
+	   width. We further assume that the core has not given us an operand
+	   wider then the expression width. So pad operands as needed. */
       draw_eval_vec4(le);
       if (lwid != ewid) {
 	    fprintf(vvp_out, "    %%pad/%c %u;\n", ivl_expr_signed(le)? 's' : 'u', ewid);
@@ -150,7 +155,7 @@ static void draw_binary_vec4_arith(ivl_expr_t expr)
       }
 
       draw_eval_vec4(re);
-      if (rwid != ewid) {
+      if ((rwid != ewid) && !is_power_op) {
 	    fprintf(vvp_out, "    %%pad/%c %u;\n", ivl_expr_signed(re)? 's' : 'u', ewid);
       }
 
@@ -171,11 +176,6 @@ static void draw_binary_vec4_arith(ivl_expr_t expr)
 	    fprintf(vvp_out, "    %%mod%s;\n", signed_string);
 	    break;
 	  case 'p':
-	      /* Note that the power operator is signed if EITHER of
-		 the operands is signed. This is different from other
-		 arithmetic operators. */
-	    if (ivl_expr_signed(le) || ivl_expr_signed(re))
-		  signed_string = "/s";
 	    fprintf(vvp_out, "    %%pow%s;\n", signed_string);
 	    break;
 
@@ -1255,10 +1255,24 @@ static void draw_unary_vec4(ivl_expr_t expr)
 	    local_count += 1;
 	    break;
 
-	  case 'v': /* Cast real to vec4 */
-	    assert(ivl_expr_value(sub) == IVL_VT_REAL);
-	    draw_eval_real(sub);
-	    fprintf(vvp_out, "    %%cvt/vr %u;\n", ivl_expr_width(expr));
+	  case 'v': /* Cast expression to vec4 */
+	    switch (ivl_expr_value(sub)) {
+		case IVL_VT_REAL:
+		  draw_eval_real(sub);
+		  fprintf(vvp_out, "    %%cvt/vr %u;\n", ivl_expr_width(expr));
+		  break;
+		case IVL_VT_STRING:
+		  draw_eval_string(sub);
+		  fprintf(vvp_out, "    %%cast/vec4/str %u;\n", ivl_expr_width(expr));
+		  break;
+		case IVL_VT_DARRAY:
+		  draw_eval_object(sub);
+		  fprintf(vvp_out, "    %%cast/vec4/dar %u;\n", ivl_expr_width(expr));
+		  break;
+		default:
+		  assert(0);
+		  break;
+	    }
 	    break;
 
 	  case '2': /* Cast expression to bool */
@@ -1275,6 +1289,14 @@ static void draw_unary_vec4(ivl_expr_t expr)
 		case IVL_VT_REAL:
 		  draw_eval_real(sub);
 		  fprintf(vvp_out, "    %%cvt/vr %u;\n", ivl_expr_width(expr));
+		  break;
+		case IVL_VT_STRING:
+		  draw_eval_string(sub);
+		  fprintf(vvp_out, "    %%cast/vec4/str %u;\n", ivl_expr_width(expr));
+		  break;
+		case IVL_VT_DARRAY:
+		  draw_eval_object(sub);
+		  fprintf(vvp_out, "    %%cast/vec2/dar %u;\n", ivl_expr_width(expr));
 		  break;
 		default:
 		  assert(0);

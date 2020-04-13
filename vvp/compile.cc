@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001-2018 Stephen Williams (steve@icarus.com)
+ * Copyright (c) 2001-2019 Stephen Williams (steve@icarus.com)
  *
  *    This source code is free software; you can redistribute it
  *    and/or modify it in source code form under the terms of the GNU
@@ -117,6 +117,9 @@ static const struct opcode_table_s opcode_table[] = {
       { "%cassign/vec4",    of_CASSIGN_VEC4,    1,{OA_FUNC_PTR,OA_NONE,     OA_NONE} },
       { "%cassign/vec4/off",of_CASSIGN_VEC4_OFF,2,{OA_FUNC_PTR,OA_BIT1,     OA_NONE} },
       { "%cassign/wr",  of_CASSIGN_WR,  1,{OA_FUNC_PTR,OA_NONE,     OA_NONE} },
+      { "%cast/vec2/dar", of_CAST_VEC2_DAR, 1,  {OA_NUMBER,   OA_NONE,     OA_NONE} },
+      { "%cast/vec4/dar", of_CAST_VEC4_DAR, 1,  {OA_NUMBER,   OA_NONE,     OA_NONE} },
+      { "%cast/vec4/str", of_CAST_VEC4_STR, 1,  {OA_NUMBER,   OA_NONE,     OA_NONE} },
       { "%cast2",   of_CAST2,  0,  {OA_NONE,     OA_NONE,     OA_NONE} },
       { "%cmp/e",   of_CMPE,   0,  {OA_NONE,     OA_NONE,     OA_NONE} },
       { "%cmp/ne",  of_CMPNE,  0,  {OA_NONE,     OA_NONE,     OA_NONE} },
@@ -375,6 +378,8 @@ vpiHandle vvp_lookup_handle(const char*label)
 
 vvp_net_t* vvp_net_lookup(const char*label)
 {
+      static bool t0_trigger_generated = false;
+
         /* First, look to see if the symbol is a vpi object of some
 	   sort. If it is, then get the vvp_ipoint_t pointer out of
 	   the vpiHandle. */
@@ -421,6 +426,23 @@ vvp_net_t* vvp_net_lookup(const char*label)
 
 	/* Failing that, look for a general functor. */
       vvp_net_t*tmp = lookup_functor_symbol(label);
+
+	// This is a special label used to create a T0 trigger for the
+	// always_comb/latch processes.
+     if (! t0_trigger_generated && (strcmp(label, "E_0x0") == 0)) {
+	      // This should never happen, but if it does then the E_0x0
+	      // event generation may need to be explicitly generated in
+	      // the compiler output instead of implicitly in this code.
+	    assert(! vpip_peek_current_scope()->is_automatic());
+	    t0_trigger_generated = true;
+	      // Create a local event with no name for the T0 trigger
+	    compile_named_event(strdup(label), strcpy(new char [1],""), true);
+	    tmp = vvp_net_lookup(label);
+	    assert(tmp);
+	      // Create a trigger for the T0 event.
+	    vvp_net_ptr_t ptr (tmp, 0);
+	    schedule_t0_trigger(ptr);
+     }
 
       return tmp;
 }
@@ -478,7 +500,6 @@ struct vvp_net_resolv_list_s: public resolv_list_s {
 
 bool vvp_net_resolv_list_s::resolve(bool mes)
 {
-      static bool t0_trigger_generated = false;
       vvp_net_t*tmp = vvp_net_lookup(label());
 
       if (tmp) {
@@ -486,25 +507,6 @@ bool vvp_net_resolv_list_s::resolve(bool mes)
 	    tmp->link(port);
 	    return true;
       }
-
-	// This is a special label used to create a T0 trigger for the
-	// always_comb/latch processes.
-     if (! t0_trigger_generated && (strcmp(label(), "E_0x0") == 0)) {
-	      // This should never happen, but if it does then the E_0x0
-	      // event generation may need to be explictly generated in
-	      // the compiler output instead of implicitly in this code.
-	    assert(! vpip_peek_current_scope()->is_automatic());
-	    t0_trigger_generated = true;
-	      // Create a local event with no name for the T0 trigger
-	    compile_named_event(strdup(label()), strcpy(new char [1],""), true);
-	    tmp = vvp_net_lookup(label());
-	    assert(tmp);
-	    tmp->link(port);
-	      // Create a trigger for the T0 event.
-	    vvp_net_ptr_t ptr (tmp, 0);
-	    schedule_t0_trigger(ptr);
-	    return true;
-     }
 
       if (mes)
 	    fprintf(stderr, "unresolved vvp_net reference: %s\n", label());
@@ -676,7 +678,7 @@ struct code_label_resolv_list_s: public resolv_list_s {
 bool code_label_resolv_list_s::resolve(bool mes)
 {
       symbol_value_t val = sym_get_value(sym_codespace, label());
-      if (val.num) {
+      if (val.ptr) {
 	    if (cptr2_flag)
 		  code->cptr2 = reinterpret_cast<vvp_code_t>(val.ptr);
 	    else

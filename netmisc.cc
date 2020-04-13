@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001-2017 Stephen Williams (steve@icarus.com)
+ * Copyright (c) 2001-2019 Stephen Williams (steve@icarus.com)
  *
  *    This source code is free software; you can redistribute it
  *    and/or modify it in source code form under the terms of the GNU
@@ -158,7 +158,7 @@ NetExpr* cast_to_int2(NetExpr*expr, unsigned width)
 NetExpr* cast_to_int4(NetExpr*expr, unsigned width)
 {
 	// Special case: The expression is already LOGIC or BOOL
-      if (expr->expr_type() != IVL_VT_REAL)
+      if (expr->expr_type() == IVL_VT_LOGIC || expr->expr_type() == IVL_VT_BOOL)
 	    return expr;
 
       if (debug_elaborate)
@@ -925,6 +925,19 @@ static NetExpr* do_elab_and_eval(Design*des, NetScope*scope, PExpr*pe,
       if (tmp == 0) return 0;
 
       if ((cast_type != IVL_VT_NO_TYPE) && (cast_type != tmp->expr_type())) {
+            switch (tmp->expr_type()) {
+                case IVL_VT_BOOL:
+                case IVL_VT_LOGIC:
+                case IVL_VT_REAL:
+                  break;
+                default:
+                  cerr << tmp->get_fileline() << ": error: "
+                          "The expression '" << *pe << "' cannot be implicitly "
+                          "cast to the target type." << endl;
+                  des->errors += 1;
+                  delete tmp;
+                  return 0;
+            }
             switch (cast_type) {
                 case IVL_VT_REAL:
                   tmp = cast_to_real(tmp);
@@ -996,6 +1009,36 @@ NetExpr* elab_and_eval(Design*des, NetScope*scope, PExpr*pe,
             flags |= PExpr::NEED_CONST;
 
       NetExpr*tmp = pe->elaborate_expr(des, scope, lv_net_type, flags);
+      if (tmp == 0) return 0;
+
+      ivl_variable_type_t cast_type = ivl_type_base(lv_net_type);
+      if ((cast_type != IVL_VT_NO_TYPE) && (cast_type != tmp->expr_type())) {
+	      // Catch some special cases.
+	    switch (cast_type) {
+		case IVL_VT_DARRAY:
+		case IVL_VT_QUEUE:
+		  if (dynamic_cast<PEAssignPattern*>(pe))
+			return tmp;
+		  // fall through
+		case IVL_VT_STRING:
+		  if (dynamic_cast<PEConcat*>(pe))
+			return tmp;
+		  break;
+		case IVL_VT_CLASS:
+		  if (dynamic_cast<PENull*>(pe))
+			return tmp;
+		  break;
+		default:
+		  break;
+	    }
+
+	    cerr << tmp->get_fileline() << ": error: "
+		    "The expression '" << *pe << "' cannot be implicitly "
+		    "cast to the target type." << endl;
+	    des->errors += 1;
+	    delete tmp;
+	    return 0;
+      }
 
       return tmp;
 }
@@ -1037,50 +1080,94 @@ NetExpr* elab_sys_task_arg(Design*des, NetScope*scope, perm_string name,
       return tmp;
 }
 
-bool evaluate_ranges(Design*des, NetScope*scope,
+bool evaluate_range(Design*des, NetScope*scope, const LineInfo*li,
+		    const pform_range_t&range, long&index_l, long&index_r)
+{
+      bool dimension_ok = true;
+
+        // Unsized and queue dimensions should be handled before calling
+        // this function. If we find them here, we are in a context where
+        // they are not allowed.
+      if (range.first == 0) {
+            cerr << li->get_fileline() << ": error: "
+                    "An unsized dimension is not allowed here." << endl;
+            dimension_ok = false;
+            des->errors += 1;
+      } else if (dynamic_cast<PENull*>(range.first)) {
+            cerr << li->get_fileline() << ": error: "
+                    "A queue dimension is not allowed here." << endl;
+            dimension_ok = false;
+            des->errors += 1;
+      } else {
+            NetExpr*texpr = elab_and_eval(des, scope, range.first, -1, true);
+            if (! eval_as_long(index_l, texpr)) {
+                  cerr << range.first->get_fileline() << ": error: "
+                          "Dimensions must be constant." << endl;
+                  cerr << range.first->get_fileline() << "       : "
+                       << (range.second ? "This MSB" : "This size")
+                       << " expression violates the rule: "
+                       << *range.first << endl;
+                  dimension_ok = false;
+                  des->errors += 1;
+            }
+            delete texpr;
+
+            if (range.second == 0) {
+                    // This is a SystemVerilog [size] dimension. The IEEE
+                    // standard does not allow this in a packed dimension,
+                    // but we do. At least one commercial simulator does too.
+                  if (!dimension_ok) {
+                        // bail out
+                  } else if (index_l > 0) {
+                        index_l = index_l - 1;
+                        index_r = 0;
+                  } else {
+                        cerr << range.first->get_fileline() << ": error: "
+                                "Dimension size must be greater than zero." << endl;
+                        cerr << range.first->get_fileline() << "       : "
+                                "This size expression violates the rule: "
+                             << *range.first << endl;
+                        dimension_ok = false;
+                        des->errors += 1;
+                  }
+            } else {
+                  texpr = elab_and_eval(des, scope, range.second, -1, true);
+                  if (! eval_as_long(index_r, texpr)) {
+                        cerr << range.second->get_fileline() << ": error: "
+                                "Dimensions must be constant." << endl;
+                        cerr << range.second->get_fileline() << "       : "
+                                "This LSB expression violates the rule: "
+                             << *range.second << endl;
+                        dimension_ok = false;
+                        des->errors += 1;
+                  }
+                  delete texpr;
+            }
+      }
+
+        /* Error recovery */
+      if (!dimension_ok) {
+            index_l = 0;
+            index_r = 0;
+      }
+
+      return dimension_ok;
+}
+
+bool evaluate_ranges(Design*des, NetScope*scope, const LineInfo*li,
 		     vector<netrange_t>&llist,
 		     const list<pform_range_t>&rlist)
 {
-      bool bad_msb = false, bad_lsb = false;
+      bool dimensions_ok = true;
 
       for (list<pform_range_t>::const_iterator cur = rlist.begin()
 		 ; cur != rlist.end() ; ++cur) {
-	    long use_msb, use_lsb;
-
-	    NetExpr*texpr = elab_and_eval(des, scope, cur->first, -1, true);
-	    if (! eval_as_long(use_msb, texpr)) {
-		  cerr << cur->first->get_fileline() << ": error: "
-			"Range expressions must be constant." << endl;
-		  cerr << cur->first->get_fileline() << "       : "
-			"This MSB expression violates the rule: "
-		       << *cur->first << endl;
-		  des->errors += 1;
-		  bad_msb = true;
-	    }
-
-	    delete texpr;
-
-	    texpr = elab_and_eval(des, scope, cur->second, -1, true);
-	    if (! eval_as_long(use_lsb, texpr)) {
-		  cerr << cur->second->get_fileline() << ": error: "
-			"Range expressions must be constant." << endl;
-		  cerr << cur->second->get_fileline() << "       : "
-			"This LSB expression violates the rule: "
-		       << *cur->second << endl;
-		  des->errors += 1;
-		  bad_lsb = true;
-	    }
-
-	    delete texpr;
-
-	      /* Error recovery */
-	    if (bad_lsb) use_lsb = 0;
-	    if (bad_msb) use_msb = use_lsb;
-
-	    llist.push_back(netrange_t(use_msb, use_lsb));
+            long index_l, index_r;
+            dimensions_ok &= evaluate_range(des, scope, li, *cur, index_l, index_r);
+            llist.push_back(netrange_t(index_l, index_r));
       }
 
-      return bad_msb | bad_lsb;
+      return dimensions_ok;
 }
 
 void eval_expr(NetExpr*&expr, int context_width)
@@ -1446,7 +1533,13 @@ bool evaluate_index_prefix(Design*des, NetScope*scope,
       list<index_component_t>::const_iterator icur = indices.begin();
       for (size_t idx = 0 ; (idx+1) < indices.size() ; idx += 1, ++icur) {
 	    assert(icur != indices.end());
-	    assert(icur->sel == index_component_t::SEL_BIT);
+	    if (icur->sel != index_component_t::SEL_BIT) {
+		  cerr << icur->msb->get_fileline() << ": error: "
+			"All but the final index in a chain of indices must be "
+			"a single value, not a range." << endl;
+		  des->errors += 1;
+		  return false;
+	    }
 	    NetExpr*texpr = elab_and_eval(des, scope, icur->msb, -1, true);
 
 	    long tmp;

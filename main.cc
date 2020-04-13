@@ -1,5 +1,5 @@
 const char COPYRIGHT[] =
-          "Copyright (c) 1998-2017 Stephen Williams (steve@icarus.com)";
+          "Copyright (c) 1998-2019 Stephen Williams (steve@icarus.com)";
 
 /*
  *    This source code is free software; you can redistribute it
@@ -104,7 +104,8 @@ generation_t generation_flag = GN_DEFAULT;
 bool gn_icarus_misc_flag = true;
 bool gn_cadence_types_flag = true;
 bool gn_specify_blocks_flag = true;
-bool gn_assertions_flag = true;
+bool gn_supported_assertions_flag = true;
+bool gn_unsupported_assertions_flag = true;
 bool gn_io_range_error_flag = true;
 bool gn_strict_ca_eval_flag = false;
 bool gn_strict_expr_width_flag = false;
@@ -135,6 +136,7 @@ void add_vpi_module(const char*name)
 	    vpi_module_list = tmp;
       }
       flags["VPI_MODULE_LIST"] = vpi_module_list;
+      load_vpi_module(name);
 }
 
 map<perm_string,unsigned> missing_modules;
@@ -331,10 +333,16 @@ static void process_generation_flag(const char*gen)
 	    gn_specify_blocks_flag = false;
 
       } else if (strcmp(gen,"assertions") == 0) {
-	    gn_assertions_flag = true;
+	    gn_supported_assertions_flag = true;
+	    gn_unsupported_assertions_flag = true;
+
+      } else if (strcmp(gen,"supported-assertions") == 0) {
+	    gn_supported_assertions_flag = true;
+	    gn_unsupported_assertions_flag = false;
 
       } else if (strcmp(gen,"no-assertions") == 0) {
-	    gn_assertions_flag = false;
+	    gn_supported_assertions_flag = false;
+	    gn_unsupported_assertions_flag = false;
 
       } else if (strcmp(gen,"verilog-ams") == 0) {
 	    gn_verilog_ams_flag = true;
@@ -598,6 +606,14 @@ static void read_iconfig_file(const char*ipath)
       }
 
       while (fgets(buf, sizeof buf, ifile) != 0) {
+	    assert(strlen(buf) < sizeof buf);
+	    if ((strlen(buf) == ((sizeof buf) - 1))
+		&& buf[sizeof buf -2] != '\n') {
+		  cerr << "WARNING: Line buffer overflow reading iconfig file: "
+		       << ipath
+		       << "." << endl;
+		  assert(0);
+	    }
 	    if (buf[0] == '#')
 		  continue;
 	    char*cp = strchr(buf, ':');
@@ -735,7 +751,7 @@ static void read_iconfig_file(const char*ipath)
 			break;
 		  }
 
-		} else if (strcmp(buf, "ignore_missing_modules") == 0) {
+	    } else if (strcmp(buf, "ignore_missing_modules") == 0) {
 		  if (strcmp(cp, "true") == 0)
 		    ignore_missing_modules = true;
 
@@ -800,6 +816,17 @@ static void read_sources_file(const char*path)
       }
 
       while (fgets(line_buf, sizeof line_buf, fd) != 0) {
+	      // assertion test that we are not overflowing the line
+	      // buffer. Really should make this more robust, but
+	      // better to assert then go weird.
+	    assert(strlen(line_buf) < sizeof line_buf);
+	    if ((strlen(line_buf) == ((sizeof line_buf) - 1))
+		&& line_buf[sizeof line_buf -2] != '\n') {
+		  cerr << "WARNING: Line buffer overflow reading sources file: "
+		       << path
+		       << "." << endl;
+		  assert(0);
+	    }
 	    char*cp = line_buf + strspn(line_buf, " \t\r\b\f");
 	    char*tail = cp + strlen(cp);
 	    while (tail > cp) {
@@ -892,11 +919,6 @@ int main(int argc, char*argv[])
         }
       }
       library_suff.push_back(strdup(".v"));
-
-	// Start the module list with the base system module.
-      add_vpi_module("system");
-      add_vpi_module("vhdl_sys");
-      add_vpi_module("vhdl_textio");
 
       flags["-o"] = strdup("a.out");
       min_typ_max_flag = TYP;
@@ -1174,7 +1196,7 @@ int main(int argc, char*argv[])
 
       if (roots.empty()) {
 	    cerr << "No top level modules, and no -s option." << endl;
-	    return 1;
+	    return ignore_missing_modules ? 0 : 1;
       }
 
 

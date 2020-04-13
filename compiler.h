@@ -1,7 +1,7 @@
 #ifndef IVL_compiler_H
 #define IVL_compiler_H
 /*
- * Copyright (c) 1999-2017 Stephen Williams (steve@icarus.com)
+ * Copyright (c) 1999-2019 Stephen Williams (steve@icarus.com)
  *
  *    This source code is free software; you can redistribute it
  *    and/or modify it in source code form under the terms of the GNU
@@ -177,9 +177,12 @@ extern bool gn_icarus_misc_flag;
    is false, then skip elaboration of specify behavior. */
 extern bool gn_specify_blocks_flag;
 
-/* If this flag is true, then elaborate assertions. If this flag is
-   false, then stub out assertion statements. */
-extern bool gn_assertions_flag;
+/* If this flag is true, then elaborate supported assertion statements. If
+   this flag is false, then stub out supported assertion statements. */
+extern bool gn_supported_assertions_flag;
+/* If this flag is true, then error on unsupported assertion statements. If
+   this flag is false, then stub out unsupported assertion statements. */
+extern bool gn_unsupported_assertions_flag;
 
 /* If this flag is true, then support/elaborate Verilog-AMS. */
 extern bool gn_verilog_ams_flag;
@@ -283,12 +286,20 @@ struct sfunc_return_type {
       const char*   name;
       ivl_variable_type_t type;
       unsigned      wid;
-      int           signed_flag;
+      bool          signed_flag;
+      bool          override_flag;
 };
 
+extern void add_sys_func(const struct sfunc_return_type&ret_type);
 extern const struct sfunc_return_type* lookup_sys_func(const char*name);
 extern int load_sys_func_table(const char*path);
 extern void cleanup_sys_func_table();
+/*
+ * This temporarily loads a VPI module, to determine the return values
+ * of system functions provided by that module, and adds the return values
+ * to the system function table.
+ */
+extern bool load_vpi_module(const char*path);
 
 /*
  * In system Verilog it is allowed with a warning to call a function

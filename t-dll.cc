@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2018 Stephen Williams (steve@icarus.com)
+ * Copyright (c) 2000-2020 Stephen Williams (steve@icarus.com)
  * Copyright CERN 2013 / Stephen Williams (steve@icarus.com)
  *
  *    This source code is free software; you can redistribute it
@@ -256,11 +256,6 @@ ivl_scope_t dll_target::find_scope(ivl_design_s &des, const NetScope*cur)
 	    return 0;
       }
 
-      if (cur->type() == NetScope::CLASS) {
-	    ivl_scope_t tmp = des.classes[cur];
-	    return tmp;
-      }
-
       for (unsigned idx = 0; idx < des.roots.size(); idx += 1) {
 	    assert(des.roots[idx]);
 	    ivl_scope_t scope = find_scope_from_root(des.roots[idx], cur);
@@ -271,13 +266,6 @@ ivl_scope_t dll_target::find_scope(ivl_design_s &des, const NetScope*cur)
       for (size_t idx = 0; idx < des.packages.size(); idx += 1) {
 	    assert(des.packages[idx]);
 	    ivl_scope_t scope = find_scope_from_root(des.packages[idx], cur);
-	    if (scope)
-		  return scope;
-      }
-
-      for (map<const NetScope*,ivl_scope_t>::iterator idx = des.classes.begin()
-		 ; idx != des.classes.end() ; ++ idx) {
-	    ivl_scope_t scope = find_scope_from_root(idx->second, cur);
 	    if (scope)
 		  return scope;
       }
@@ -596,14 +584,14 @@ static void fill_in_scope_function(ivl_scope_t scope, const NetScope*net)
       const NetFuncDef*def = net->func_def();
       assert(def);
 
-      const NetNet*return_sig = def->return_sig();
-      if (return_sig == 0) {
+      if (def->is_void()) {
 	      // Special case: If there is no return signal, this is
 	      // apparently a VOID function.
 	    scope->func_type = IVL_VT_VOID;
 	    scope->func_signed = 0;
 	    scope->func_width = 0;
       } else {
+	    const NetNet*return_sig = def->return_sig();
 	    scope->func_type = return_sig->data_type();
 	    scope->func_signed = return_sig->get_signed();
 	    scope->func_width = return_sig->vector_width();
@@ -665,11 +653,6 @@ void dll_target::add_root(const NetScope *s)
 	  case NetScope::PACKAGE:
 	    root_->ports = 0;
 	    des_.packages.push_back(root_);
-	    break;
-
-	  case NetScope::CLASS:
-	    root_->ports = 0;
-	    des_.classes[s] = root_;
 	    break;
 
 	  default:
@@ -2478,16 +2461,7 @@ void dll_target::net_probe(const NetEvProbe*)
 
 void dll_target::scope(const NetScope*net)
 {
-      if (net->parent()==0 && net->type()==NetScope::CLASS) {
-
-	    if (debug_emit) {
-		  cerr << "dll_target::scope: "
-		       << "Add class " << scope_path(net)
-		       << " as a root scope." << endl;
-	    }
-	    add_root(net);
-
-      } if (net->parent() == 0) {
+      if (net->parent() == 0) {
 
 	      // Root scopes are already created...
 
@@ -2561,7 +2535,8 @@ void dll_target::scope(const NetScope*net)
 		  scop->tname_ = scop->name_;
 		  break;
 		case NetScope::CLASS:
-		  assert(0);
+		  scop->type_ = IVL_SCT_CLASS;
+		  scop->tname_ = scop->name_;
 		  break;
 	    }
       }
@@ -2818,6 +2793,7 @@ bool dll_target::signal_paths(const NetNet*net)
 		  obj->path[ptr].src = nex->t_cookie();
 		  obj->path[ptr].condit = path_condit;
 		  obj->path[ptr].conditional = src->is_condit();
+		  obj->path[ptr].parallel = src->is_parallel();
 		  obj->path[ptr].posedge = src->is_posedge();
 		  obj->path[ptr].negedge = src->is_negedge();
 		  for (unsigned pe = 0 ;  pe < 12 ;  pe += 1) {

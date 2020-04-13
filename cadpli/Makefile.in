@@ -59,7 +59,7 @@ distclean: clean
 	rm -f Makefile config.log
 
 cppcheck: $(O:.o=.c)
-	cppcheck --enable=all -f $(INCLUDE_PATH) $^
+	cppcheck --enable=all --std=posix --std=c99 --std=c++03 -f $(INCLUDE_PATH) $^
 
 Makefile: $(srcdir)/Makefile.in ../config.status
 	cd ..; ./config.status --file=cadpli/$@
@@ -71,17 +71,19 @@ dep:
 	$(CC) $(CPPFLAGS) $(CFLAGS) @DEPENDENCY_FLAG@ -c $<
 	mv $*.d dep
 
-SYSTEM_VPI_LDFLAGS = -L../vvp -lvpi
+SYSTEM_VPI_LDFLAGS = -L../vpi -lvpi
 ifeq (@MINGW32@,yes)
     SYSTEM_VPI_LDFLAGS += @EXTRALIBS@
 endif
 
-cadpli.vpl: $O ../vvp/libvpi.a ../libveriuser/libveriuser.o
+cadpli.vpl: $O ../vpi/libvpi.a ../libveriuser/libveriuser.o
 	$(CC) @shared@ $(LDFLAGS) -o $@ $O ../libveriuser/libveriuser.o $(SYSTEM_VPI_LDFLAGS)
 
-install: all installdirs $(vpidir)/cadpli.vpl
+install: all installdirs installfiles
 
-$(vpidir)/cadpli.vpl: ./cadpli.vpl
+F = ./cadpli.vpl
+
+installfiles: $(F) | installdirs
 	$(INSTALL_PROGRAM) ./cadpli.vpl "$(DESTDIR)$(vpidir)/cadpli.vpl"
 
 installdirs: $(srcdir)/../mkinstalldirs

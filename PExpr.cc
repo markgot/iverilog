@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998-2016 Stephen Williams <steve@icarus.com>
+ * Copyright (c) 1998-2019 Stephen Williams <steve@icarus.com>
  * Copyright CERN 2013 / Stephen Williams (steve@icarus.com)
  *
  *    This source code is free software; you can redistribute it
@@ -126,9 +126,8 @@ PEBinary::~PEBinary()
 
 void PEBinary::declare_implicit_nets(LexicalScope*scope, NetNet::Type type)
 {
-      assert(left_ && right_);
-      left_->declare_implicit_nets(scope, type);
-      right_->declare_implicit_nets(scope, type);
+      if (left_) left_->declare_implicit_nets(scope, type);
+      if (right_) right_->declare_implicit_nets(scope, type);
 }
 
 bool PEBinary::has_aa_term(Design*des, NetScope*scope) const
@@ -204,12 +203,12 @@ PEBShift::~PEBShift()
 }
 
 PECallFunction::PECallFunction(const pform_name_t&n, const vector<PExpr *> &parms)
-: package_(0), path_(n), parms_(parms)
+: package_(0), path_(n), parms_(parms), is_overridden_(false)
 {
 }
 
 PECallFunction::PECallFunction(PPackage*pkg, const pform_name_t&n, const vector<PExpr *> &parms)
-: package_(pkg), path_(n), parms_(parms)
+: package_(pkg), path_(n), parms_(parms), is_overridden_(false)
 {
 }
 
@@ -222,7 +221,7 @@ static pform_name_t pn_from_ps(perm_string n)
 }
 
 PECallFunction::PECallFunction(PPackage*pkg, perm_string n, const list<PExpr *> &parms)
-: package_(pkg), path_(pn_from_ps(n)), parms_(parms.size())
+: package_(pkg), path_(pn_from_ps(n)), parms_(parms.size()), is_overridden_(false)
 {
       int tmp_idx = 0;
       assert(parms_.size() == parms.size());
@@ -232,18 +231,18 @@ PECallFunction::PECallFunction(PPackage*pkg, perm_string n, const list<PExpr *> 
 }
 
 PECallFunction::PECallFunction(perm_string n, const vector<PExpr*>&parms)
-: package_(0), path_(pn_from_ps(n)), parms_(parms)
+: package_(0), path_(pn_from_ps(n)), parms_(parms), is_overridden_(false)
 {
 }
 
 PECallFunction::PECallFunction(perm_string n)
-: package_(0), path_(pn_from_ps(n))
+: package_(0), path_(pn_from_ps(n)), is_overridden_(false)
 {
 }
 
 // NOTE: Anachronism. Try to work all use of svector out.
 PECallFunction::PECallFunction(const pform_name_t&n, const list<PExpr *> &parms)
-: package_(0), path_(n), parms_(parms.size())
+: package_(0), path_(n), parms_(parms.size()), is_overridden_(false)
 {
       int tmp_idx = 0;
       assert(parms_.size() == parms.size());
@@ -253,7 +252,7 @@ PECallFunction::PECallFunction(const pform_name_t&n, const list<PExpr *> &parms)
 }
 
 PECallFunction::PECallFunction(perm_string n, const list<PExpr*>&parms)
-: package_(0), path_(pn_from_ps(n)), parms_(parms.size())
+: package_(0), path_(pn_from_ps(n)), parms_(parms.size()), is_overridden_(false)
 {
       int tmp_idx = 0;
       assert(parms_.size() == parms.size());

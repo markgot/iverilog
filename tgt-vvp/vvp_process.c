@@ -644,12 +644,19 @@ static int show_stmt_block_named(ivl_statement_t net, ivl_scope_t scope)
 static int show_stmt_case(ivl_statement_t net, ivl_scope_t sscope)
 {
       int rc = 0;
+      ivl_case_quality_t qual = ivl_stmt_case_quality(net);
       ivl_expr_t expr = ivl_stmt_cond_expr(net);
       unsigned count = ivl_stmt_case_count(net);
 
       unsigned local_base = local_count;
 
       unsigned idx, default_case;
+
+      if (qual != IVL_CASE_QUALITY_BASIC && qual != IVL_CASE_QUALITY_PRIORITY) {
+	    fprintf(stderr, "%s:%u: tgt-vvp sorry: "
+		    "Case unique/unique0 qualities are ignored.\n",
+		    ivl_stmt_file(net), ivl_stmt_lineno(net));
+      }
 
       show_stmt_file_line(net, "Case statement.");
 
@@ -708,6 +715,23 @@ static int show_stmt_case(ivl_statement_t net, ivl_scope_t sscope)
       if (default_case < count) {
 	    ivl_statement_t cst = ivl_stmt_case_stmt(net, default_case);
 	    rc += show_statement(cst, sscope);
+      }
+	/* Emit code to check unique and priority have handled a value
+           (when there is no default). */
+      else if (default_case == count) {
+          switch (qual) {
+          case IVL_CASE_QUALITY_UNIQUE:
+          case IVL_CASE_QUALITY_PRIORITY:
+              fprintf(vvp_out, "    %%vpi_call/w %u %u \"$warning\", "
+                      "\"value is unhandled for priority or unique case statement\""
+                      " {0 0 0};\n",
+                      ivl_file_table_index(ivl_stmt_file(net)),
+                      ivl_stmt_lineno(net));
+              break;
+
+          default:
+              break;
+          }
       }
 
 	/* Jump to the out of the case. */
@@ -1654,7 +1678,10 @@ static int show_stmt_wait(ivl_statement_t net, ivl_scope_t sscope)
 
       show_stmt_file_line(net, "Event wait (@) statement.");
 
-      if (ivl_stmt_nevent(net) == 1) {
+      if (ivl_stmt_nevent(net) == 0) {
+	    assert(ivl_stmt_needs_t0_trigger(net) == 1);
+	    fprintf(vvp_out, "    %%wait E_0x0;\n");
+      } else if (ivl_stmt_nevent(net) == 1) {
 	    ivl_event_t ev = ivl_stmt_events(net, 0);
 	    if (ivl_stmt_needs_t0_trigger(net)) {
 		  fprintf(vvp_out, "Ewait_%u .event/or E_%p, E_0x0;\n",

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002-2017 Stephen Williams (steve@icarus.com)
+ * Copyright (c) 2002-2019 Stephen Williams (steve@icarus.com)
  *
  *    This source code is free software; you can redistribute it
  *    and/or modify it in source code form under the terms of the GNU
@@ -19,15 +19,15 @@
 
 # include "config.h"
 
-# include <iostream>
-
+# include  <iostream>
+# include  <set>
 # include  <cassert>
 # include  <typeinfo>
 # include  "compiler.h"
 # include  "netlist.h"
 # include  "netmisc.h"
 
-NexusSet* NetExpr::nex_input(bool, bool) const
+NexusSet* NetExpr::nex_input(bool, bool, bool) const
 {
       cerr << get_fileline()
 	   << ": internal error: nex_input not implemented: "
@@ -35,7 +35,7 @@ NexusSet* NetExpr::nex_input(bool, bool) const
       return new NexusSet;
 }
 
-NexusSet* NetProc::nex_input(bool, bool) const
+NexusSet* NetProc::nex_input(bool, bool, bool) const
 {
       cerr << get_fileline()
 	   << ": internal error: NetProc::nex_input not implemented"
@@ -43,13 +43,13 @@ NexusSet* NetProc::nex_input(bool, bool) const
       return new NexusSet;
 }
 
-NexusSet* NetEArrayPattern::nex_input(bool rem_out, bool search_funcs) const
+NexusSet* NetEArrayPattern::nex_input(bool rem_out, bool always_sens, bool nested_func) const
 {
       NexusSet*result = new NexusSet;
       for (size_t idx = 0 ; idx < items_.size() ; idx += 1) {
 	    if (items_[idx]==0) continue;
 
-	    NexusSet*tmp = items_[idx]->nex_input(rem_out, search_funcs);
+	    NexusSet*tmp = items_[idx]->nex_input(rem_out, always_sens, nested_func);
 	    if (tmp == 0) continue;
 
 	    result->add(*tmp);
@@ -58,32 +58,32 @@ NexusSet* NetEArrayPattern::nex_input(bool rem_out, bool search_funcs) const
       return result;
 }
 
-NexusSet* NetEBinary::nex_input(bool rem_out, bool search_funcs) const
+NexusSet* NetEBinary::nex_input(bool rem_out, bool always_sens, bool nested_func) const
 {
-      NexusSet*result = left_->nex_input(rem_out, search_funcs);
-      NexusSet*tmp = right_->nex_input(rem_out, search_funcs);
+      NexusSet*result = left_->nex_input(rem_out, always_sens, nested_func);
+      NexusSet*tmp = right_->nex_input(rem_out, always_sens, nested_func);
       result->add(*tmp);
       delete tmp;
       return result;
 }
 
-NexusSet* NetEConcat::nex_input(bool rem_out, bool search_funcs) const
+NexusSet* NetEConcat::nex_input(bool rem_out, bool always_sens, bool nested_func) const
 {
       if (parms_[0] == NULL) return new NexusSet;
-      NexusSet*result = parms_[0]->nex_input(rem_out, search_funcs);
+      NexusSet*result = parms_[0]->nex_input(rem_out, always_sens, nested_func);
       for (unsigned idx = 1 ;  idx < parms_.size() ;  idx += 1) {
 	    if (parms_[idx] == NULL) {
 		  delete result;
 		  return new NexusSet;
 	    }
-	    NexusSet*tmp = parms_[idx]->nex_input(rem_out, search_funcs);
+	    NexusSet*tmp = parms_[idx]->nex_input(rem_out, always_sens, nested_func);
 	    result->add(*tmp);
 	    delete tmp;
       }
       return result;
 }
 
-NexusSet* NetEAccess::nex_input(bool, bool) const
+NexusSet* NetEAccess::nex_input(bool, bool, bool) const
 {
       return new NexusSet;
 }
@@ -91,59 +91,73 @@ NexusSet* NetEAccess::nex_input(bool, bool) const
 /*
  * A constant has not inputs, so always return an empty set.
  */
-NexusSet* NetEConst::nex_input(bool, bool) const
+NexusSet* NetEConst::nex_input(bool, bool, bool) const
 {
       return new NexusSet;
 }
 
-NexusSet* NetECReal::nex_input(bool, bool) const
+NexusSet* NetECReal::nex_input(bool, bool, bool) const
 {
       return new NexusSet;
 }
 
-NexusSet* NetEEvent::nex_input(bool, bool) const
+NexusSet* NetEEvent::nex_input(bool, bool, bool) const
 {
       return new NexusSet;
 }
 
-NexusSet* NetELast::nex_input(bool, bool) const
+NexusSet* NetELast::nex_input(bool, bool, bool) const
 {
       return new NexusSet;
 }
 
-NexusSet* NetENetenum::nex_input(bool, bool) const
+NexusSet* NetENetenum::nex_input(bool, bool, bool) const
 {
       return new NexusSet;
 }
 
-NexusSet* NetENew::nex_input(bool, bool) const
+NexusSet* NetENew::nex_input(bool, bool, bool) const
 {
       return new NexusSet;
 }
 
-NexusSet* NetENull::nex_input(bool, bool) const
+NexusSet* NetENull::nex_input(bool, bool, bool) const
 {
       return new NexusSet;
 }
 
-NexusSet* NetEProperty::nex_input(bool, bool) const
+NexusSet* NetEProperty::nex_input(bool, bool, bool) const
 {
       return new NexusSet;
 }
 
-NexusSet* NetEScope::nex_input(bool, bool) const
+NexusSet* NetEScope::nex_input(bool, bool, bool) const
 {
       return new NexusSet;
 }
 
-NexusSet* NetESelect::nex_input(bool rem_out, bool search_funcs) const
+NexusSet* NetESelect::nex_input(bool rem_out, bool always_sens, bool nested_func) const
 {
-      NexusSet*result = base_? base_->nex_input(rem_out, search_funcs) : new NexusSet();
-      NexusSet*tmp = expr_->nex_input(rem_out, search_funcs);
+      NexusSet*result = base_? base_->nex_input(rem_out, always_sens, nested_func) : new NexusSet();
+      NexusSet*tmp = expr_->nex_input(rem_out, always_sens, nested_func);
+      bool const_select = result->size() == 0;
+      if (always_sens && const_select) {
+	    if (NetEConst *val = dynamic_cast <NetEConst*> (base_)) {
+		  assert(select_type() == IVL_SEL_OTHER);
+		  if (NetESignal *sig = dynamic_cast<NetESignal*> (expr_)) {
+			delete tmp;
+			tmp = sig->nex_input_base(rem_out, always_sens, nested_func,
+                                                  val->value().as_unsigned(), expr_width());
+		  } else {
+			cerr << get_fileline() << ": Sorry, cannot determine the sensitivity "
+			     << "for the select of " << *expr_ << ", using all bits." << endl;
+		  }
+	    }
+      }
       result->add(*tmp);
       delete tmp;
 	/* See the comment for NetESignal below. */
-      if (base_ && warn_sens_entire_vec) {
+      if (base_ && ! always_sens && warn_sens_entire_vec) {
 	    cerr << get_fileline() << ": warning: @* is sensitive to all "
 	            "bits in '" << *expr_ << "'." << endl;
       }
@@ -153,7 +167,7 @@ NexusSet* NetESelect::nex_input(bool rem_out, bool search_funcs) const
 /*
  * The $fread, etc. system functions can have NULL arguments.
  */
-NexusSet* NetESFunc::nex_input(bool rem_out, bool search_funcs) const
+NexusSet* NetESFunc::nex_input(bool rem_out, bool always_sens, bool nested_func) const
 {
       NexusSet*result = new NexusSet;
 
@@ -161,7 +175,7 @@ NexusSet* NetESFunc::nex_input(bool rem_out, bool search_funcs) const
 
       for (unsigned idx = 0 ;  idx < parms_.size() ;  idx += 1) {
 	    if (parms_[idx]) {
-		  NexusSet*tmp = parms_[idx]->nex_input(rem_out, search_funcs);
+		  NexusSet*tmp = parms_[idx]->nex_input(rem_out, always_sens, nested_func);
 		  result->add(*tmp);
 		  delete tmp;
 	    }
@@ -170,12 +184,18 @@ NexusSet* NetESFunc::nex_input(bool rem_out, bool search_funcs) const
       return result;
 }
 
-NexusSet* NetEShallowCopy::nex_input(bool, bool) const
+NexusSet* NetEShallowCopy::nex_input(bool, bool, bool) const
 {
       return new NexusSet;
 }
 
-NexusSet* NetESignal::nex_input(bool rem_out, bool search_funcs) const
+NexusSet* NetESignal::nex_input(bool rem_out, bool always_sens, bool nested_func) const
+{
+      return nex_input_base(rem_out, always_sens, nested_func, 0, 0);
+}
+
+NexusSet* NetESignal::nex_input_base(bool rem_out, bool always_sens, bool nested_func,
+                                     unsigned base, unsigned width) const
 {
 	/*
 	 * This is not what I would expect for the various selects (bit,
@@ -183,55 +203,78 @@ NexusSet* NetESignal::nex_input(bool rem_out, bool search_funcs) const
 	 * instead of building the appropriate select and then using it
 	 * as the trigger. Other simulators also add everything.
 	 */
+      bool const_select = false;
+      unsigned const_word = 0;
       NexusSet*result = new NexusSet;
 	/* Local signals are not added to the sensitivity list. */
       if (net_->local_flag()) return result;
 	/* If we have an array index add it to the sensitivity list. */
       if (word_) {
 	    NexusSet*tmp;
-	    tmp = word_->nex_input(rem_out, search_funcs);
+	    tmp = word_->nex_input(rem_out, always_sens, nested_func);
 	    result->add(*tmp);
 	    delete tmp;
-            if (warn_sens_entire_arr) {
+            if (!always_sens && warn_sens_entire_arr) {
                   cerr << get_fileline() << ": warning: @* is sensitive to all "
                        << net_->unpacked_count() << " words in array '"
                        << name() << "'." << endl;
             }
+	    if (always_sens) if (NetEConst *val = dynamic_cast <NetEConst*> (word_)) {
+		  const_select = true;
+		  const_word = val->value().as_unsigned();
+	    }
       }
-      for (unsigned idx = 0 ;  idx < net_->pin_count() ;  idx += 1)
-	    result->add(net_->pin(idx).nexus(), 0, net_->vector_width());
+
+      if ((base == 0) && (width == 0)) width = net_->vector_width();
+
+      if (const_select) {
+	    result->add(net_->pin(const_word).nexus(), base, width);
+      } else {
+	    for (unsigned idx = 0 ;  idx < net_->pin_count() ;  idx += 1)
+		  result->add(net_->pin(idx).nexus(), base, width);
+      }
 
       return result;
 }
 
-NexusSet* NetETernary::nex_input(bool rem_out, bool search_funcs) const
+NexusSet* NetETernary::nex_input(bool rem_out, bool always_sens, bool nested_func) const
 {
       NexusSet*tmp;
-      NexusSet*result = cond_->nex_input(rem_out, search_funcs);
+      NexusSet*result = cond_->nex_input(rem_out, always_sens, nested_func);
 
-      tmp = true_val_->nex_input(rem_out, search_funcs);
+      tmp = true_val_->nex_input(rem_out, always_sens, nested_func);
       result->add(*tmp);
       delete tmp;
 
-      tmp = false_val_->nex_input(rem_out, search_funcs);
+      tmp = false_val_->nex_input(rem_out, always_sens, nested_func);
       result->add(*tmp);
       delete tmp;
 
       return result;
 }
 
-NexusSet* NetEUFunc::nex_input(bool rem_out, bool search_funcs) const
+NexusSet* NetEUFunc::nex_input(bool rem_out, bool always_sens, bool nested_func) const
 {
       NexusSet*result = new NexusSet;
+
       for (unsigned idx = 0 ;  idx < parms_.size() ;  idx += 1) {
-	    NexusSet*tmp = parms_[idx]->nex_input(rem_out, search_funcs);
+	    NexusSet*tmp = parms_[idx]->nex_input(rem_out, always_sens, nested_func);
 	    result->add(*tmp);
 	    delete tmp;
       }
 
-      if (search_funcs) {
+      if (always_sens) {
 	    NetFuncDef*func = func_->func_def();
-	    NexusSet*tmp = func->proc()->nex_input(rem_out, search_funcs);
+
+	      // Avoid recursive function calls.
+	    static set<NetFuncDef*> func_set;
+	    if (!nested_func)
+		  func_set.clear();
+
+	    if (!func_set.insert(func).second)
+		  return result;
+
+	    NexusSet*tmp = func->proc()->nex_input(rem_out, always_sens, true);
 	      // Remove the function inputs
 	    NexusSet*in = new NexusSet;
 	    for (unsigned idx = 0 ;  idx < func->port_count() ;  idx += 1) {
@@ -249,28 +292,28 @@ NexusSet* NetEUFunc::nex_input(bool rem_out, bool search_funcs) const
       return result;
 }
 
-NexusSet* NetEUnary::nex_input(bool rem_out, bool search_funcs) const
+NexusSet* NetEUnary::nex_input(bool rem_out, bool always_sens, bool nested_func) const
 {
-      return expr_->nex_input(rem_out, search_funcs);
+      return expr_->nex_input(rem_out, always_sens, nested_func);
 }
 
-NexusSet* NetAlloc::nex_input(bool, bool) const
+NexusSet* NetAlloc::nex_input(bool, bool, bool) const
 {
       return new NexusSet;
 }
 
-NexusSet* NetAssign_::nex_input(bool rem_out, bool search_funcs) const
+NexusSet* NetAssign_::nex_input(bool rem_out, bool always_sens, bool nested_func) const
 {
       assert(! nest_);
       NexusSet*result = new NexusSet;
 
       if (word_) {
-	    NexusSet*tmp = word_->nex_input(rem_out, search_funcs);
+	    NexusSet*tmp = word_->nex_input(rem_out, always_sens, nested_func);
 	    result->add(*tmp);
 	    delete tmp;
       }
       if (base_) {
-	    NexusSet*tmp = base_->nex_input(rem_out, search_funcs);
+	    NexusSet*tmp = base_->nex_input(rem_out, always_sens, nested_func);
 	    result->add(*tmp);
 	    delete tmp;
       }
@@ -278,12 +321,12 @@ NexusSet* NetAssign_::nex_input(bool rem_out, bool search_funcs) const
       return result;
 }
 
-NexusSet* NetAssignBase::nex_input(bool rem_out, bool search_funcs) const
+NexusSet* NetAssignBase::nex_input(bool rem_out, bool always_sens, bool nested_func) const
 {
       NexusSet*result = new NexusSet;
 	// For the deassign and release statements there is no R-value.
       if (rval_) {
-	    NexusSet*tmp = rval_->nex_input(rem_out, search_funcs);
+	    NexusSet*tmp = rval_->nex_input(rem_out, always_sens, nested_func);
 	    result->add(*tmp);
 	    delete tmp;
       }
@@ -292,7 +335,7 @@ NexusSet* NetAssignBase::nex_input(bool rem_out, bool search_funcs) const
 	   particular, index expressions are statement inputs as well,
 	   so should be addressed here. */
       for (NetAssign_*cur = lval_ ;  cur ;  cur = cur->more) {
-	    NexusSet*tmp = cur->nex_input(rem_out, search_funcs);
+	    NexusSet*tmp = cur->nex_input(rem_out, always_sens, nested_func);
 	    result->add(*tmp);
 	    delete tmp;
       }
@@ -317,11 +360,11 @@ NexusSet* NetAssignBase::nex_input(bool rem_out, bool search_funcs) const
  * In this example, "t" should not be in the input set because it is
  * used by the sequence as a temporary value.
  */
-NexusSet* NetBlock::nex_input(bool rem_out, bool search_funcs) const
+NexusSet* NetBlock::nex_input(bool rem_out, bool always_sens, bool nested_func) const
 {
       if (last_ == 0) return new NexusSet;
 
-      if (! search_funcs && (type_ != SEQU)) {
+      if (! always_sens && (type_ != SEQU)) {
 	    cerr << get_fileline() << ": internal error: Sorry, "
 		 << "I don't know how to synthesize fork/join blocks."
 		 << endl;
@@ -336,7 +379,7 @@ NexusSet* NetBlock::nex_input(bool rem_out, bool search_funcs) const
 
       do {
 	      /* Get the inputs for the current statement. */
-	    NexusSet*tmp = cur->nex_input(rem_out, search_funcs);
+	    NexusSet*tmp = cur->nex_input(rem_out, always_sens, nested_func);
 
 	      /* Add the current input set to the accumulated input set. */
 	    result->add(*tmp);
@@ -363,9 +406,9 @@ NexusSet* NetBlock::nex_input(bool rem_out, bool search_funcs) const
  * the inputs to all the guards, and the inputs to all the guarded
  * statements.
  */
-NexusSet* NetCase::nex_input(bool rem_out, bool search_funcs) const
+NexusSet* NetCase::nex_input(bool rem_out, bool always_sens, bool nested_func) const
 {
-      NexusSet*result = expr_->nex_input(rem_out, search_funcs);
+      NexusSet*result = expr_->nex_input(rem_out, always_sens, nested_func);
 
       for (size_t idx = 0 ;  idx < items_.size() ;  idx += 1) {
 
@@ -373,7 +416,7 @@ NexusSet* NetCase::nex_input(bool rem_out, bool search_funcs) const
 	    if (items_[idx].statement == 0)
 		  continue;
 
-	    NexusSet*tmp = items_[idx].statement->nex_input(rem_out, search_funcs);
+	    NexusSet*tmp = items_[idx].statement->nex_input(rem_out, always_sens, nested_func);
 	    result->add(*tmp);
 	    delete tmp;
 
@@ -381,7 +424,7 @@ NexusSet* NetCase::nex_input(bool rem_out, bool search_funcs) const
 		 case is special and is identified by a null
 		 guard. The default guard obviously has no input. */
 	    if (items_[idx].guard) {
-		  tmp = items_[idx].guard->nex_input(rem_out, search_funcs);
+		  tmp = items_[idx].guard->nex_input(rem_out, always_sens, nested_func);
 		  result->add(*tmp);
 		  delete tmp;
 	    }
@@ -390,18 +433,18 @@ NexusSet* NetCase::nex_input(bool rem_out, bool search_funcs) const
       return result;
 }
 
-NexusSet* NetCondit::nex_input(bool rem_out, bool search_funcs) const
+NexusSet* NetCondit::nex_input(bool rem_out, bool always_sens, bool nested_func) const
 {
-      NexusSet*result = expr_->nex_input(rem_out, search_funcs);
+      NexusSet*result = expr_->nex_input(rem_out, always_sens, nested_func);
 
       if (if_ != 0) {
-	    NexusSet*tmp = if_->nex_input(rem_out, search_funcs);
+	    NexusSet*tmp = if_->nex_input(rem_out, always_sens, nested_func);
 	    result->add(*tmp);
 	    delete tmp;
       }
 
       if (else_ != 0) {
-	    NexusSet*tmp = else_->nex_input(rem_out, search_funcs);
+	    NexusSet*tmp = else_->nex_input(rem_out, always_sens, nested_func);
 	    result->add(*tmp);
 	    delete tmp;
       }
@@ -409,17 +452,17 @@ NexusSet* NetCondit::nex_input(bool rem_out, bool search_funcs) const
       return result;
 }
 
-NexusSet* NetDisable::nex_input(bool, bool) const
+NexusSet* NetDisable::nex_input(bool, bool, bool) const
 {
       return new NexusSet;
 }
 
-NexusSet* NetDoWhile::nex_input(bool rem_out, bool search_funcs) const
+NexusSet* NetDoWhile::nex_input(bool rem_out, bool always_sens, bool nested_func) const
 {
-      NexusSet*result = cond_->nex_input(rem_out, search_funcs);
+      NexusSet*result = cond_->nex_input(rem_out, always_sens, nested_func);
 
       if (proc_) {
-	    NexusSet*tmp = proc_->nex_input(rem_out, search_funcs);
+	    NexusSet*tmp = proc_->nex_input(rem_out, always_sens, nested_func);
 	    result->add(*tmp);
 	    delete tmp;
       }
@@ -427,17 +470,17 @@ NexusSet* NetDoWhile::nex_input(bool rem_out, bool search_funcs) const
       return result;
 }
 
-NexusSet* NetEvTrig::nex_input(bool, bool) const
+NexusSet* NetEvTrig::nex_input(bool, bool, bool) const
 {
       return new NexusSet;
 }
 
-NexusSet* NetEvWait::nex_input(bool rem_out, bool search_funcs) const
+NexusSet* NetEvWait::nex_input(bool rem_out, bool always_sens, bool nested_func) const
 {
       NexusSet*result = new NexusSet;
 
       if (statement_) {
-	    NexusSet*tmp = statement_->nex_input(rem_out, search_funcs);
+	    NexusSet*tmp = statement_->nex_input(rem_out, always_sens, nested_func);
 	    result->add(*tmp);
 	    delete tmp;
       }
@@ -445,12 +488,12 @@ NexusSet* NetEvWait::nex_input(bool rem_out, bool search_funcs) const
       return result;
 }
 
-NexusSet* NetForever::nex_input(bool rem_out, bool search_funcs) const
+NexusSet* NetForever::nex_input(bool rem_out, bool always_sens, bool nested_func) const
 {
       NexusSet*result = new NexusSet;
 
       if (statement_) {
-	    NexusSet*tmp = statement_->nex_input(rem_out, search_funcs);
+	    NexusSet*tmp = statement_->nex_input(rem_out, always_sens, nested_func);
 	    result->add(*tmp);
 	    delete tmp;
       }
@@ -458,30 +501,30 @@ NexusSet* NetForever::nex_input(bool rem_out, bool search_funcs) const
       return result;
 }
 
-NexusSet* NetForLoop::nex_input(bool rem_out, bool search_funcs) const
+NexusSet* NetForLoop::nex_input(bool rem_out, bool always_sens, bool nested_func) const
 {
       NexusSet*result = new NexusSet;
 
       if (init_expr_) {
-	    NexusSet*tmp = init_expr_->nex_input(rem_out, search_funcs);
+	    NexusSet*tmp = init_expr_->nex_input(rem_out, always_sens, nested_func);
 	    result->add(*tmp);
 	    delete tmp;
       }
 
       if (condition_) {
-	    NexusSet*tmp = condition_->nex_input(rem_out, search_funcs);
+	    NexusSet*tmp = condition_->nex_input(rem_out, always_sens, nested_func);
 	    result->add(*tmp);
 	    delete tmp;
       }
 
       if (step_statement_) {
-	    NexusSet*tmp = step_statement_->nex_input(rem_out, search_funcs);
+	    NexusSet*tmp = step_statement_->nex_input(rem_out, always_sens, nested_func);
 	    result->add(*tmp);
 	    delete tmp;
       }
 
       if (statement_) {
-	    NexusSet*tmp = statement_->nex_input(rem_out, search_funcs);
+	    NexusSet*tmp = statement_->nex_input(rem_out, always_sens, nested_func);
 	    result->add(*tmp);
 	    delete tmp;
       }
@@ -498,7 +541,7 @@ NexusSet* NetForLoop::nex_input(bool rem_out, bool search_funcs) const
       return result;
 }
 
-NexusSet* NetFree::nex_input(bool, bool) const
+NexusSet* NetFree::nex_input(bool, bool, bool) const
 {
       return new NexusSet;
 }
@@ -512,12 +555,12 @@ NexusSet* NetFree::nex_input(bool, bool) const
  * include the input set of the <expr> because it does not affect the
  * result. The statement can be omitted.
  */
-NexusSet* NetPDelay::nex_input(bool rem_out, bool search_funcs) const
+NexusSet* NetPDelay::nex_input(bool rem_out, bool always_sens, bool nested_func) const
 {
       NexusSet*result = new NexusSet;
 
       if (statement_) {
-	    NexusSet*tmp = statement_->nex_input(rem_out, search_funcs);
+	    NexusSet*tmp = statement_->nex_input(rem_out, always_sens, nested_func);
 	    result->add(*tmp);
 	    delete tmp;
       }
@@ -525,12 +568,12 @@ NexusSet* NetPDelay::nex_input(bool rem_out, bool search_funcs) const
       return result;
 }
 
-NexusSet* NetRepeat::nex_input(bool rem_out, bool search_funcs) const
+NexusSet* NetRepeat::nex_input(bool rem_out, bool always_sens, bool nested_func) const
 {
-      NexusSet*result = expr_->nex_input(rem_out, search_funcs);
+      NexusSet*result = expr_->nex_input(rem_out, always_sens, nested_func);
 
       if (statement_) {
-	    NexusSet*tmp = statement_->nex_input(rem_out, search_funcs);
+	    NexusSet*tmp = statement_->nex_input(rem_out, always_sens, nested_func);
 	    result->add(*tmp);
 	    delete tmp;
       }
@@ -541,7 +584,7 @@ NexusSet* NetRepeat::nex_input(bool rem_out, bool search_funcs) const
 /*
  * The $display, etc. system tasks can have NULL arguments.
  */
-NexusSet* NetSTask::nex_input(bool rem_out, bool search_funcs) const
+NexusSet* NetSTask::nex_input(bool rem_out, bool always_sens, bool nested_func) const
 {
       NexusSet*result = new NexusSet;
 
@@ -549,7 +592,7 @@ NexusSet* NetSTask::nex_input(bool rem_out, bool search_funcs) const
 
       for (unsigned idx = 0 ;  idx < parms_.size() ;  idx += 1) {
 	    if (parms_[idx]) {
-		  NexusSet*tmp = parms_[idx]->nex_input(rem_out, search_funcs);
+		  NexusSet*tmp = parms_[idx]->nex_input(rem_out, always_sens, nested_func);
 		  result->add(*tmp);
 		  delete tmp;
 	    }
@@ -563,17 +606,17 @@ NexusSet* NetSTask::nex_input(bool rem_out, bool search_funcs) const
  * parameters to consider, because the compiler already removed them
  * and converted them to blocking assignments.
  */
-NexusSet* NetUTask::nex_input(bool, bool) const
+NexusSet* NetUTask::nex_input(bool, bool, bool) const
 {
       return new NexusSet;
 }
 
-NexusSet* NetWhile::nex_input(bool rem_out, bool search_funcs) const
+NexusSet* NetWhile::nex_input(bool rem_out, bool always_sens, bool nested_func) const
 {
-      NexusSet*result = cond_->nex_input(rem_out, search_funcs);
+      NexusSet*result = cond_->nex_input(rem_out, always_sens, nested_func);
 
       if (proc_) {
-	    NexusSet*tmp = proc_->nex_input(rem_out, search_funcs);
+	    NexusSet*tmp = proc_->nex_input(rem_out, always_sens, nested_func);
 	    result->add(*tmp);
 	    delete tmp;
       }

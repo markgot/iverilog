@@ -1,7 +1,7 @@
 #ifndef IVL_Statement_H
 #define IVL_Statement_H
 /*
- * Copyright (c) 1998-2017 Stephen Williams (steve@icarus.com)
+ * Copyright (c) 1998-2019 Stephen Williams (steve@icarus.com)
  *
  *    This source code is free software; you can redistribute it
  *    and/or modify it in source code form under the terms of the GNU
@@ -75,7 +75,7 @@ class PProcess : public LineInfo {
  * fact, the Statement class is abstract and represents all the
  * possible kinds of statements that exist in Verilog.
  */
-class Statement : public LineInfo {
+class Statement : virtual public LineInfo {
 
     public:
       Statement() { }
@@ -170,7 +170,7 @@ class PAssignNB  : public PAssign_ {
  * statements before constructing this object, so it knows a priori
  * what is contained.
  */
-class PBlock  : public PScope, public Statement {
+class PBlock  : public PScope, public Statement, public PNamedItem {
 
     public:
       enum BL_TYPE { BL_SEQ, BL_PAR, BL_JOIN_NONE, BL_JOIN_ANY };
@@ -205,6 +205,8 @@ class PBlock  : public PScope, public Statement {
       virtual void elaborate_scope(Design*des, NetScope*scope) const;
       virtual void elaborate_sig(Design*des, NetScope*scope) const;
 
+      SymbolType symbol_type() const;
+
     private:
       BL_TYPE bl_type_;
       std::vector<Statement*>list_;
@@ -230,6 +232,8 @@ class PCallTask  : public Statement {
       NetProc*elaborate_method_(Design*des, NetScope*scope,
                                 bool add_this_flag = false) const;
       NetProc*elaborate_function_(Design*des, NetScope*scope) const;
+      NetProc*elaborate_void_function_(Design*des, NetScope*scope,
+				       NetFuncDef*def) const;
 
       NetProc*elaborate_build_call_(Design*des, NetScope*scope,
 				    NetScope*task, NetExpr*use_this) const;
@@ -252,7 +256,7 @@ class PCase  : public Statement {
 	    Statement*stat;
       };
 
-      PCase(NetCase::TYPE, PExpr*ex, svector<Item*>*);
+      PCase(ivl_case_quality_t, NetCase::TYPE, PExpr*ex, svector<Item*>*);
       ~PCase();
 
       virtual NetProc* elaborate(Design*des, NetScope*scope) const;
@@ -261,6 +265,7 @@ class PCase  : public Statement {
       virtual void dump(ostream&out, unsigned ind) const;
 
     private:
+      ivl_case_quality_t quality_;
       NetCase::TYPE type_;
       PExpr*expr_;
 
@@ -403,8 +408,8 @@ class PEventStatement  : public Statement {
       explicit PEventStatement(const svector<PEEvent*>&ee);
       explicit PEventStatement(PEEvent*ee);
 	// Make an @* statement or make a special @* version with the items
-	// from functions added and ouputs removed for always_comb/latch.
-      explicit PEventStatement(bool search_funcs = false);
+	// from functions added and outputs removed for always_comb/latch.
+      explicit PEventStatement(bool always_sens = false);
 
       ~PEventStatement();
 
@@ -430,7 +435,7 @@ class PEventStatement  : public Statement {
     private:
       svector<PEEvent*>expr_;
       Statement*statement_;
-      bool search_funcs_;
+      bool always_sens_;
 };
 
 ostream& operator << (ostream&o, const PEventStatement&obj);
@@ -561,13 +566,14 @@ class PReturn  : public Statement {
 class PTrigger  : public Statement {
 
     public:
-      explicit PTrigger(const pform_name_t&ev);
+      explicit PTrigger(PPackage*pkg, const pform_name_t&ev);
       ~PTrigger();
 
       virtual NetProc* elaborate(Design*des, NetScope*scope) const;
       virtual void dump(ostream&out, unsigned ind) const;
 
     private:
+      PPackage*package_;
       pform_name_t event_;
 };
 

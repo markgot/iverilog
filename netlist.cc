@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998-2017 Stephen Williams (steve@icarus.com)
+ * Copyright (c) 1998-2020 Stephen Williams (steve@icarus.com)
  *
  *    This source code is free software; you can redistribute it
  *    and/or modify it in source code form under the terms of the GNU
@@ -309,11 +309,12 @@ unsigned NetBus::find_link(const Link&that) const
 }
 
 NetDelaySrc::NetDelaySrc(NetScope*s, perm_string n, unsigned npins,
-                         bool condit_src, bool conditional)
+                         bool condit_src, bool conditional, bool parallel)
 : NetObj(s, n, npins + (condit_src?1:0))
 {
       condit_flag_ = false;
       conditional_ = conditional;
+      parallel_ = parallel;
       posedge_ = false;
       negedge_ = false;
       for (unsigned idx = 0 ;  idx < npins ;  idx += 1) {
@@ -470,6 +471,11 @@ const Link& NetDelaySrc::condit_pin() const
 {
       ivl_assert(*this, condit_flag_);
       return pin(pin_count()-1);
+}
+
+bool NetDelaySrc::is_parallel() const
+{
+      return parallel_;
 }
 
 PortType::Enum PortType::merged( Enum lhs, Enum rhs )
@@ -2522,6 +2528,20 @@ NetETernary::~NetETernary()
       delete cond_;
       delete true_val_;
       delete false_val_;
+}
+
+const netenum_t* NetETernary::enumeration() const
+{
+	// If the condition can evaluate to an ambiguous value,
+	// the result may be blended, and so is not guaranteed
+	// to be a valid enumeration value.
+      if (cond_->expr_type() != IVL_VT_BOOL)
+	    return 0;
+
+      if (true_val_->enumeration() != false_val_->enumeration())
+	    return 0;
+
+      return true_val_->enumeration();
 }
 
 const NetExpr* NetETernary::cond_expr() const

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2018 Stephen Williams (steve@icarus.com)
+ * Copyright (c) 2000-2020 Stephen Williams (steve@icarus.com)
  * Copyright CERN 2013 / Stephen Williams (steve@icarus.com)
  * Copyright (c) 2016 CERN Michele Castellana (michele.castellana@cern.ch)
  *
@@ -93,11 +93,7 @@ extern "C" void ivl_design_roots(ivl_design_t des, ivl_scope_t **scopes,
       assert (nscopes && scopes);
       if (des->root_scope_list.size() == 0) {
 	    size_t fill = 0;
-	    des->root_scope_list.resize(des->packages.size() + des->roots.size() + des->classes.size());
-
-	    for (map<const NetScope*,ivl_scope_t>::iterator idx = des->classes.begin()
-		       ; idx != des->classes.end() ; ++ idx)
-		  des->root_scope_list[fill++] = idx->second;
+	    des->root_scope_list.resize(des->packages.size() + des->roots.size());
 
 	    for (size_t idx = 0 ; idx < des->packages.size() ; idx += 1)
 		  des->root_scope_list[fill++] = des->packages[idx];
@@ -1933,6 +1929,12 @@ extern "C" int ivl_path_is_condit(ivl_delaypath_t obj)
       return obj->conditional ? 1 : 0;
 }
 
+extern "C" int ivl_path_is_parallel(ivl_delaypath_t obj)
+{
+      assert(obj);
+      return obj->parallel ? 1 : 0;
+}
+
 extern uint64_t ivl_path_delay(ivl_delaypath_t obj, ivl_path_edge_t edg)
 {
       assert(obj);
@@ -2725,6 +2727,22 @@ extern "C" ivl_expr_t ivl_stmt_case_expr(ivl_statement_t net, unsigned idx)
 	  default:
 	    assert(0);
 	    return 0;
+      }
+}
+
+extern "C" ivl_case_quality_t ivl_stmt_case_quality(ivl_statement_t net)
+{
+      assert(net);
+      switch (net->type_) {
+	  case IVL_ST_CASE:
+	  case IVL_ST_CASER:
+	  case IVL_ST_CASEX:
+	  case IVL_ST_CASEZ:
+	    return net->u_.case_.quality;
+
+	  default:
+	    assert(0);
+	    return IVL_CASE_QUALITY_BASIC;
       }
 }
 

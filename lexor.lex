@@ -4,7 +4,7 @@
 
 %{
 /*
- * Copyright (c) 1998-2017 Stephen Williams (steve@icarus.com)
+ * Copyright (c) 1998-2019 Stephen Williams (steve@icarus.com)
  *
  *    This source code is free software; you can redistribute it
  *    and/or modify it in source code form under the terms of the GNU
@@ -50,6 +50,22 @@
  * If the name is new, it will be added to the list.
  */
 extern YYLTYPE yylloc;
+
+char* yytext_string_filter(const char*str, size_t str_len)
+{
+      if (str == 0) return 0;
+      char*buf = new char[str_len+1];
+      for (size_t idx = 0 ; idx < str_len ; idx += 1) {
+	    if (str[idx] == 0) {
+		  VLerror(yylloc, "error: Found nil (\\000) in string literal, replacing with space (\\015) character.");
+		  buf[idx] = ' ';
+	    } else {
+		  buf[idx] = str[idx];
+	    }
+      }
+      buf[str_len] = 0;
+      return buf;
+}
 
 char* strdupnew(char const *str)
 {
@@ -230,12 +246,12 @@ TU [munpf]
 <CSTRING>\\\\ { yymore(); /* Catch \\, which is a \ escaping itself */ }
 <CSTRING>\\\" { yymore(); /* Catch \", which is an escaped quote */ }
 <CSTRING>\n   { BEGIN(0);
-                yylval.text = strdupnew(yytext);
+                yylval.text = yytext_string_filter(yytext, yyleng);
 		VLerror(yylloc, "Missing close quote of string.");
 		yylloc.first_line += 1;
 		return STRING; }
 <CSTRING>\"   { BEGIN(0);
-                yylval.text = strdupnew(yytext);
+      yylval.text = yytext_string_filter(yytext, yyleng);
 		yylval.text[strlen(yytext)-1] = 0;
 		return STRING; }
 <CSTRING>.    { yymore(); }
@@ -362,7 +378,7 @@ TU [munpf]
 	/* If this identifier names a previously declared type, then
 	   return this as a TYPE_IDENTIFIER instead. */
       if (rc == IDENTIFIER && gn_system_verilog()) {
-	    if (data_type_t*type = pform_test_type_identifier(yylval.text)) {
+	    if (data_type_t*type = pform_test_type_identifier(yylloc, yylval.text)) {
 		  yylval.type_identifier.text = yylval.text;
 		  yylval.type_identifier.type = type;
 		  rc = TYPE_IDENTIFIER;
@@ -383,7 +399,7 @@ TU [munpf]
 	    }
       }
       if (gn_system_verilog()) {
-	    if (data_type_t*type = pform_test_type_identifier(yylval.text)) {
+	    if (data_type_t*type = pform_test_type_identifier(yylloc, yylval.text)) {
 		  yylval.type_identifier.text = yylval.text;
 		  yylval.type_identifier.type = type;
 		  return TYPE_IDENTIFIER;

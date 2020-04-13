@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998-2017 Stephen Williams (steve@icarus.com)
+ * Copyright (c) 1998-2019 Stephen Williams (steve@icarus.com)
  *
  *    This source code is free software; you can redistribute it
  *    and/or modify it in source code form under the terms of the GNU
@@ -99,6 +99,10 @@ ostream& operator<< (ostream&out, const name_component_t&that)
 ostream& operator<< (ostream&o, const pform_name_t&that)
 {
       pform_name_t::const_iterator cur;
+      if (that.size() == 0) {
+	    o << "<nil>";
+	    return o;
+      }
 
       cur = that.begin();
       o << *cur;
@@ -200,7 +204,10 @@ void vector_type_t::pform_dump(ostream&fd, unsigned indent) const
       if (pdims.get()) {
 	    for (list<pform_range_t>::iterator cur = pdims->begin()
 		       ; cur != pdims->end() ; ++cur) {
-		  fd << "[" << *(cur->first) << ":" << *(cur->second) << "]";
+		  fd << "[";
+		  if (cur->first)  fd << *(cur->first);
+		  if (cur->second) fd << ":" << *(cur->second);
+		  fd << "]";
 	    }
       }
       fd << endl;
@@ -524,9 +531,11 @@ void PWire::dump(ostream&out, unsigned ind) const
       if (signed_) {
 	    out << " signed";
       }
-
       if (get_isint()) {
 	    out << " integer";
+      }
+      if (get_scalar()) {
+	    out << " scalar";
       }
       if (set_data_type_) {
 	    out << " set_data_type_=" << typeid(*set_data_type_).name();
@@ -542,8 +551,12 @@ void PWire::dump(ostream&out, unsigned ind) const
 	    } else {
 		  out << " port";
 		  for (list<pform_range_t>::const_iterator cur = port_.begin()
-			     ; cur != port_.end() ; ++cur)
-			out << "[" << *cur->first << ":" << *cur->second << "]";
+			     ; cur != port_.end() ; ++cur) {
+			out << "[";
+			if (cur->first)  out << *cur->first;
+			if (cur->second) out << ":" << *cur->second;
+			out << "]";
+		  }
 	    }
       }
       if (net_set_) {
@@ -552,8 +565,12 @@ void PWire::dump(ostream&out, unsigned ind) const
 	    } else {
 		  out << " net";
 		  for (list<pform_range_t>::const_iterator cur = net_.begin()
-			     ; cur != net_.end() ; ++cur)
-			out << "[" << *cur->first << ":" << *cur->second << "]";
+			     ; cur != net_.end() ; ++cur) {
+			out << "[";
+			if (cur->first)  out << *cur->first;
+			if (cur->second) out << ":" << *cur->second;
+			out << "]";
+		  }
 	    }
       }
 
@@ -704,10 +721,11 @@ void PGModule::dump(ostream&out, unsigned ind) const
       if (parms_) {
 	    assert(overrides_ == 0);
 	    out << "#(";
-	    out << "." << parms_[0].name << "(" << *parms_[0].parm << ")";
-	    for (unsigned idx = 1 ;  idx < nparms_ ;  idx += 1) {
-		  out << ", ." << parms_[idx].name << "(" <<
-			*parms_[idx].parm << ")";
+	    for (unsigned idx = 0 ;  idx < nparms_ ;  idx += 1) {
+                  if (idx > 0) out << ", ";
+		  out << "." << parms_[idx].name << "(";
+                  if (parms_[idx].parm) out << *parms_[idx].parm;
+                  out << ")";
 	    }
 	    out << ") ";
       }
@@ -836,6 +854,19 @@ void PCallTask::dump(ostream&out, unsigned ind) const
 void PCase::dump(ostream&out, unsigned ind) const
 {
       out << setw(ind) << "";
+      switch (quality_) {
+	  case IVL_CASE_QUALITY_BASIC:
+	    break;
+	  case IVL_CASE_QUALITY_UNIQUE:
+	    out << "unique ";
+	    break;
+	  case IVL_CASE_QUALITY_UNIQUE0:
+	    out << "unique0 ";
+	    break;
+	  case IVL_CASE_QUALITY_PRIORITY:
+	    out << "priority ";
+	    break;
+      }
       switch (type_) {
 	  case NetCase::EQ:
 	    out << "case";
@@ -1355,22 +1386,22 @@ void LexicalScope::dump_typedefs_(ostream&out, unsigned indent) const
 
 void LexicalScope::dump_parameters_(ostream&out, unsigned indent) const
 {
-      typedef map<perm_string,param_expr_t>::const_iterator parm_iter_t;
+      typedef map<perm_string,param_expr_t*>::const_iterator parm_iter_t;
       for (parm_iter_t cur = parameters.begin()
 		 ; cur != parameters.end() ; ++ cur ) {
 	    out << setw(indent) << "" << "parameter "
-                << (*cur).second.type << " ";
-	    if ((*cur).second.signed_flag)
+                << (*cur).second->type << " ";
+	    if ((*cur).second->signed_flag)
 		  out << "signed ";
-	    if ((*cur).second.msb)
-		  out << "[" << *(*cur).second.msb << ":"
-		      << *(*cur).second.lsb << "] ";
+	    if ((*cur).second->msb)
+		  out << "[" << *(*cur).second->msb << ":"
+		      << *(*cur).second->lsb << "] ";
 	    out << (*cur).first << " = ";
-	    if ((*cur).second.expr)
-		  out << *(*cur).second.expr;
+	    if ((*cur).second->expr)
+		  out << *(*cur).second->expr;
 	    else
 		  out << "/* ERROR */";
-	    for (LexicalScope::range_t*tmp = (*cur).second.range
+	    for (LexicalScope::range_t*tmp = (*cur).second->range
 		       ; tmp ; tmp = tmp->next) {
 		  if (tmp->exclude_flag)
 			out << " exclude ";
@@ -1404,16 +1435,16 @@ void LexicalScope::dump_parameters_(ostream&out, unsigned indent) const
 
 void LexicalScope::dump_localparams_(ostream&out, unsigned indent) const
 {
-      typedef map<perm_string,param_expr_t>::const_iterator parm_iter_t;
+      typedef map<perm_string,param_expr_t*>::const_iterator parm_iter_t;
       for (parm_iter_t cur = localparams.begin()
 		 ; cur != localparams.end() ; ++ cur ) {
 	    out << setw(indent) << "" << "localparam ";
-	    if ((*cur).second.msb)
-		  out << "[" << *(*cur).second.msb << ":"
-		      << *(*cur).second.lsb << "] ";
+	    if ((*cur).second->msb)
+		  out << "[" << *(*cur).second->msb << ":"
+		      << *(*cur).second->lsb << "] ";
 	    out << (*cur).first << " = ";
-	    if ((*cur).second.expr)
-		  out << *(*cur).second.expr << ";" << endl;
+	    if ((*cur).second->expr)
+		  out << *(*cur).second->expr << ";" << endl;
 	    else
 		  out << "/* ERROR */;" << endl;
       }
@@ -1509,16 +1540,16 @@ void PClass::dump(ostream&out, unsigned indent) const
 
 void Module::dump_specparams_(ostream&out, unsigned indent) const
 {
-      typedef map<perm_string,param_expr_t>::const_iterator parm_iter_t;
+      typedef map<perm_string,param_expr_t*>::const_iterator parm_iter_t;
       for (parm_iter_t cur = specparams.begin()
 		 ; cur != specparams.end() ; ++ cur ) {
 	    out << setw(indent) << "" << "specparam ";
-	    if ((*cur).second.msb)
-		  out << "[" << *(*cur).second.msb << ":"
-		      << *(*cur).second.lsb << "] ";
+	    if ((*cur).second->msb)
+		  out << "[" << *(*cur).second->msb << ":"
+		      << *(*cur).second->lsb << "] ";
 	    out << (*cur).first << " = ";
-	    if ((*cur).second.expr)
-		  out << *(*cur).second.expr << ";" << endl;
+	    if ((*cur).second->expr)
+		  out << *(*cur).second->expr << ";" << endl;
 	    else
 		  out << "/* ERROR */;" << endl;
       }
@@ -1719,6 +1750,7 @@ void PPackage::pform_dump(std::ostream&out) const
       out << "package " << pscope_name() << endl;
       dump_localparams_(out, 4);
       dump_parameters_(out, 4);
+      dump_typedefs_(out, 4);
       dump_enumerations_(out, 4);
       dump_wires_(out, 4);
       dump_tasks_(out, 4);
